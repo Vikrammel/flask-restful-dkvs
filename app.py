@@ -43,6 +43,11 @@ notInView = [] # Keep track of nodes not in view to see if they're back online.
 replicas = []
 proxies = []
 
+def _print(text):
+    if debug:
+        print (text)
+        sys.stdout.flush()
+
 #function to order list of IPs so that nodes can refrence the same node by index when using the
 #array for list, replicas, or proxies
 #TODO: Use something more efficient than insertion sort.
@@ -91,11 +96,10 @@ def heartBeat():
         firstHeartBeat = False
         return
     if debug:
-        print("My IP: " + str(IpPort))
-        print("View: " + str(view))
-        print("Replicas: " + str(replicas))
-        print("Proxies: " + str(proxies))
-        sys.stdout.flush()
+        _print("My IP: " + str(IpPort) + newline +
+            "View: " + str(view) + newline +
+            "Replicas: " + str(replicas) + newline +
+            "Proxies: " + str(proxies))
 
     for ip in notInView: #check if any nodes not currently in view came back online
         try:
@@ -256,9 +260,7 @@ def updateDatabase():
                     vClock[key] = response['causal_payload'][key].encode('ascii', 'ignore')
                     timestamps[key] = response['timestamp'][key].encode('ascii', 'ignore')
         except requests.exceptions.RequestException: #Handle no response from ip
-            if debug:
-                print("updateDatabase timeout occured.")
-                sys.stdout.flush()
+            _print("updateDatabase timeout occured.")
             removeReplica(ip)
             notInView.append(ip)
             notInView = sortIPs(notInView)
@@ -268,22 +270,17 @@ def broadcastKey(key, value, payload, time):
     for address in replicas:
         if address != IpPort:
             if debug:
-                print("Address: " + str(address)+ " Address type: " + str(type(address)))
-                print("IpPort: " + str(IpPort)+ " IpPort type: " + str(type(IpPort)))
-                print("KEY: " + str(key)+ " Address type: " + str(type(key)))
-                print("value: " + str(value)+ " value type: " + str(type(value)))
-                print("payload: " + str(payload)+ " payload type: " + str(type(payload)))
-                print("time: " + str(time)+ " time type: " + str(type(time)))
-                sys.stdout.flush()
+                _print("Address: " + str(address)+ " Address type: " + str(type(address)) + newline +
+                    "IpPort: " + str(IpPort)+ " IpPort type: " + str(type(IpPort)) + newline +
+                    "KEY: " + str(key)+ " Address type: " + str(type(key)) + newline +
+                    "value: " + str(value)+ " value type: " + str(type(value)) + newline +
+                    "payload: " + str(payload)+ " payload type: " + str(type(payload)) + newline +
+                    "time: " + str(time)+ " time type: " + str(type(time)))
             try:
-                if debug:
-                    print("Sending to " + str(address))
-                    sys.stdout.flush()
+                _print("Sending to " + str(address))
                 requests.put((http_str + address + kv_str + key), data = {'val': value, 'causal_payload': payload, 'timestamp': time})
             except:
-                if debug:
-                    print("broadcast failed to " + str(address))
-                    sys.stdout.flush()
+                _print("broadcast failed to " + str(address))
                 #removeReplica(address)
 
 class Handle(Resource):
@@ -403,8 +400,7 @@ class Handle(Resource):
             try:
                 key = key.encode('ascii', 'ignore')
             except:
-                print("Could not encode key.")
-                sys.stdout.flush()
+                _print("Could not encode key.")
 
             #Restricts key length to 1<=key<=200 characters.
             if not 1 <= len(str(key)) <= 200:
@@ -501,8 +497,7 @@ class Handle(Resource):
                     notInView = sortIPs(notInView)
                     continue
                 noResp = False
-            if debug:
-                print(response.json())
+            _print(response.json())
             return response.json()
 
         def put(self, key):
@@ -516,8 +511,7 @@ class Handle(Resource):
                     notInView = request.form['notInView'].encode('ascii', 'ignore').split(",")
                     proxies = request.form['proxies'].encode('ascii', 'ignore').split(",")
                 except:
-                    print("update failed")
-                    sys.stdout.flush()
+                    _print("update failed")
                     return {"result": "error", 'msg': 'System command parameter error'}, 403
 
                 if proxies[0] == '':
@@ -534,23 +528,20 @@ class Handle(Resource):
                     uni = request.form['id']
                     replicaDetail = uni.encode('ascii', 'ignore')
                 except:
-                    print("'ID not provided in setIsReplica")
-                    sys.stdout.flush()
+                    _print("'ID not provided in setIsReplica")
                     return {"result": "error", 'msg': 'ID not provided in setIsReplica'}, 403
                 if replicaDetail == "0":
                     isReplica = False
                 elif replicaDetail == "1":
                     isReplica = True
                 else:
-                    print("Incorrect ID in setIsReplica")
-                    sys.stduout.flush()
+                    _print("Incorrect ID in setIsReplica")
                     return {"result": "error", 'msg': 'Incorrect ID in setIsReplica'}, 403
                 return {"result": "success"}, 200
 
             #Makes sure a value was actually supplied in the PUT.
             try:
-                uT = request.form['timestamp']
-                timestamp = uT.encode('ascii', 'ignore')
+                timestamp = request.form['timestamp'].encode('ascii', 'ignore')
             except:
                 timestamp = ''
             try:
@@ -564,8 +555,7 @@ class Handle(Resource):
             try:
                 key = key.encode('ascii', 'ignore')
             except:
-                print("Key not encoding")
-                sys.stdout.flush()
+                _print("Key not encoding")
                 pass
             #Try requesting random replicas
             noResp = True
