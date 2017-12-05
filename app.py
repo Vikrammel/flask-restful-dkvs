@@ -6,6 +6,7 @@ from flask import request, abort, jsonify, json
 from flask_restful import Resource, Api
 import re, sys, os, requests, datetime, threading, random
 
+
 app = Flask(__name__)
 api = Api(app)
 newline = "&#13;&#10;"
@@ -14,6 +15,11 @@ debug = True
 exitapp = False
 firstHeartBeat = True
 
+def _print(text):
+    if debug == True:
+        print (text)
+        sys.stdout.flush()
+
 # Get expected environment variables.
 IpPort = os.environ.get('IPPORT')
 try:
@@ -21,7 +27,8 @@ try:
 except:
     K = ''
 try:
-    EnvView = os.environ.get('VIEW')
+    EnvString = os.environ.get('VIEW')
+    EnvView = EnvString.split(',')
 except:
     EnvView = ''
 
@@ -61,14 +68,21 @@ def sortIPs(IPArr):
         AnsArr[j+1] = ip
     return AnsArr
 
+_print(EnvView.index(IpPort))
+_print(K)
+
 # Initialize view array based on Environment Variable 'VIEW'
 if EnvView is not None:
-    notInView = EnvView.split(",")
+    notInView = EnvString.split(",")
     notInView = sortIPs(notInView)
 if IpPort in notInView:
     notInView.remove(IpPort)
 view.append(IpPort)
-replicas.append(IpPort)
+if ((EnvView.index(IpPort) + 1) > K ):
+    proxies.append(IpPort)
+    isReplica = False
+else:
+    replicas.append(IpPort)
 
 def removeReplica(ip):
     replicas.remove(ip)
@@ -211,6 +225,7 @@ def updateView(self, key):
         else:
             # Creates new proxy
             proxies.append(ip_payload)
+            requests.put(http_str + ip_payload + kv_str + '_setIsReplica!', data={'id': 0})
             view.append(ip_payload)
             proxies = sortIPs(proxies)
             view = sortIPs(view)  
@@ -220,7 +235,9 @@ def updateView(self, key):
         
         if ip_payload in notInView:
             notInView.remove(ip_payload)
-        requests.put(http_str + ip_payload + kv_str + '_update!', data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "replicas": ','.join(replicas), "proxies": ','.join(proxies)})
+        updateRatio()  
+        if ip_payload != IpPort:    
+            requests.put(http_str + ip_payload + kv_str + '_update!', data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "replicas": ','.join(replicas), "proxies": ','.join(proxies)})
         return {"msg": "success", "node_id": ip_payload, "number_of_nodes": len(view)}, 200
 
     if _type == 'remove':
@@ -364,13 +381,33 @@ class Handle(Resource):
                 global K, view, notInView, replicas, proxies
                 try:
                     K = request.form['K'].encode('ascii', 'ignore')
-                    view = request.form['view'].encode('ascii', 'ignore').split(",")
-                    notInView = request.form['notInView'].encode('ascii', 'ignore').split(",")
-                    replicas = request.form['replicas'].encode('ascii', 'ignore').split(",")
+                except:
+                    return {"result": "error", 'msg': 'System command parameter error'}, 401
+                try:
                     proxies = request.form['proxies'].encode('ascii', 'ignore').split(",")
-
+                except:
+                    return {"result": "error", 'msg': 'System command parameter error'}, 402
+                try:
+                    view = request.form['view'].encode('ascii', 'ignore').split(",")
                 except:
                     return {"result": "error", 'msg': 'System command parameter error'}, 403
+                try:
+                    notInView = request.form['notInView'].encode('ascii', 'ignore').split(",")
+                except:
+                    return {"result": "error", 'msg': 'System command parameter error'}, 404
+                try:
+                    replicas = request.form['replicas'].encode('ascii', 'ignore').split(",")
+                except:
+                    return {"result": "error", 'msg': 'System command parameter error'}, 405
+
+                try:
+                    _print(K)
+                    _print(view)
+                    _print(replicas)
+                    _print(proxies)
+                    _print(notInView)
+                except:
+                    return {"result": "error", 'msg': 'System command parameter error'}, 406
                 for key in d:
                     readRepair(key)
                 
@@ -547,6 +584,10 @@ class Handle(Resource):
                 if notInView[0] == '':
                     notInView.pop(0)
                 return {"result": "success"}, 200
+
+            #Special command: Handles adding/deleting nodes.
+            if key == 'update_view':
+                return updateView(self, key)
 
             #Special command: Force set a node's identity as replica/proxy.
             if key == '_setIsReplica!':
