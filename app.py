@@ -26,7 +26,7 @@ except:
     EnvView = ''
 
 # Is this a replica or a proxy?
-isReplica = False
+isReplica = True
 # Dictionaries acting as a vector clock and timestamps. key -> local clock value/timestamp.
 vClock = {}
 storedTimeStamp = {}
@@ -69,8 +69,6 @@ if IpPort in notInView:
     notInView.remove(IpPort)
 view.append(IpPort)
 replicas.append(IpPort)
-else:
-    view = []
 
 def removeReplica(ip):
     replicas.remove(ip)
