@@ -11,7 +11,8 @@ app = Flask(__name__)
 api = Api(app)
 newline = "&#13;&#10;"
 # Debug printing boolean.
-debug = True
+debug = False
+showHeartbeat = True
 exitapp = False
 firstHeartBeat = True
 
@@ -96,18 +97,18 @@ def heartBeat():
     heart = threading.Timer(3.0, heartBeat)
     heart.daemon = True
     heart.start()
-    global firstHeartBeat, replicas, proxies, view, notInView
+    global firstHeartBeat, replicas, proxies, view, notInView, showHeartbeat
     if firstHeartBeat:
         firstHeartBeat = False
         return
-    # print("My IP: " + str(IpPort))
-    _print("View: " + str(view))
-    _print("Replicas: " + str(replicas))
-    _print("Proxies: " + str(proxies))
+
+    if showHeartbeat:
+        print("View: " + str(view))
+        print("Replicas: " + str(replicas))
+        print("Proxies: " + str(proxies))
+        sys.stdout.flush()
 
     for ip in notInView: #check if any nodes not currently in view came back online
-        # print("for notinView loop eneter")
-        # sys.stdout.flush()
         try:
             response = (requests.get((http_str + ip + kv_str + "get_node_details"), timeout=2)).json()
             if response['result'] == 'success':
@@ -117,23 +118,13 @@ def heartBeat():
         except: #Handle no response from i
             pass
     for ip in view:
-        # print("For IP loop Entered")
-        # sys.stdout.flush()
         if ip != IpPort:
-            # print("ip not equal to IPPort")
-            # sys.stdout.flush()
             try:
                 response = (requests.get((http_str + ip + kv_str + "get_node_details"), timeout=2)).json()
             except requests.exceptions.RequestException as exc: #Handle no response from ip
-                # print("Try Failed, now inside except")
-                # sys.stdout.flush()
-                if ip in replicas:
-                    # print("in is in replicas")
-                    # sys.stdout.flush() 
+                if ip in replicas: 
                     removeReplica(ip)
                 elif ip in proxies:
-                    # print("ip is in proxies")
-                    # sys.stdout.flush()
                     removeProxie(ip)
                 notInView.append(ip)
                 notInView = sortIPs(notInView)
@@ -197,34 +188,23 @@ def updateView(self, key):
             # so we have to pass it the view, K, replicas, proxies, arrays
             # if numRep > 0:
             return {'result': 'success', 'node_id': str(ip_payload), 'number_of_nodes': str(len(view))}, 200
-            # else:
-            #     headers = {'Content-Type': 'application/json', 'Accept':'application/json'}
-            #     requests.put(http_str + ip_payload + kv_str + '_update!', data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "replicas": ','.join(replicas), "proxies": ','.join(proxies)})
-            #     return {'result': 'success', 'node_id': str(ip_payload), 'number_of_nodes': str(len(view))}, 212
-
-        # if debug:
-        #     print(K)
-        #     print(len(replicas))
+            
         elif ip_payload != IpPort:
-            if len(replicas) < K:
+            view.append(ip_payload)
+            view = sortIPs(view)
+            if view.index(ip_payload) < K:
                 # Creates new replica
-                replicas.append(ip_payload)
-                view.append(ip_payload)
-                replicas = sortIPs(replicas)
-                view = sortIPs(view)  
                 requests.put(http_str + ip_payload + kv_str + '_setIsReplica!', data={'id': 1}) #tell node to be replica
-                if debug:
-                    _print("New replica created.")
+                replicas.append(ip_payload)
+                replicas = sortIPs(replicas)
+                _print("New replica created.")
                     
             else:
                 # Creates new proxy
-                proxies.append(ip_payload)
                 requests.put(http_str + ip_payload + kv_str + '_setIsReplica!', data={'id': 0})
-                view.append(ip_payload)
+                proxies.append(ip_payload)
                 proxies = sortIPs(proxies)
-                view = sortIPs(view)  
-                if debug:
-                    _print("New proxie created.")
+                _print("New proxie created.")
                     
         if ip_payload in notInView:
             notInView.remove(ip_payload)
@@ -255,45 +235,42 @@ def updateView(self, key):
     return {'result': 'error', 'msg': 'Request type not valid'}, 403
 
 def updateRatio():
-    global view, replicas, proxies, isReplica
+    global view, replicas, proxies, isReplica, K
     view = sortIPs(view)
+    _print("K at start of updateRatio(): " + str(K))
+    _print("view at the start of updateRatio(): " + str(view))
+    _print("proxies at the start of updateRatio(): " + str(proxies))
+    _print("replicas at the start of updateRatio(): " + str(replicas))
+
     for node in view:
         # This is a replica.
-        if view.index(node) < K:
-            #print("UpdateRatio: " + node + "is in pos < K")
-            #sys.stdout.flush()
+        if view.index(node) < int(K):
+            _print(str(node) + " is in 'if' of updateRatio()")
             if node not in replicas:
                 if node in proxies:
                     proxies.remove(node)
-                # requests.put(http_str + ip_payload + kv_str + '_setIsReplica!', data={'id': 1})
                 replicas.append(node)
                 replicas = sortIPs(replicas)
-                #print("UpdateRatio: " + node + "added to replicas array")
-                #sys.stdout.flush()
                 if node == IpPort:
                     isReplica = True
                     for key in d:
                         readRepair(key)
-                # else:
-                #     requests.put(http_str + node + kv_str + '_setIsReplica!', data={'id': 1}) #tell node to be replica
-
+               
         # This is a proxy.
         else:
-            #print("UpdateRatio: " + node + "is in pos >= K")
-            #sys.stdout.flush()
+            _print(str(node) + " is in 'else' of updateRatio()")
             if node not in proxies:
                 if node in replicas:
                     replicas.remove(node)
                 proxies.append(node)
                 proxies = sortIPs(proxies)
-                #print("UpdateRatio: " + node + "added to replicas array")
-                #sys.stdout.flush()
                 if node == IpPort:
                     isReplica = False
-                # else:
-                    # requests.put(http_str + node + kv_str + '_setIsReplica!', data={'id': 0}) #tell node to be proxy
+    
+    _print("view at the end of updateRatio(): " + str(view))
+    _print("proxies at the end of updateRatio(): " + str(proxies))
+    _print("replicas at the end of updateRatio(): " + str(replicas))
 
-   
 #read-repair function
 def readRepair(key):
     global firstHeartBeat, replicas, proxies, view, notInView
@@ -323,7 +300,6 @@ def broadcastKey(key, value, payload, time):
                 requests.put((http_str + address + kv_str + key), data = {'val': value, 'causal_payload': payload, 'timestamp': time})
             except :
                 _print("broadcast failed to " + str(address))
-                # removeReplica(address)
 
 class Handle(Resource):
     if isReplica:
@@ -388,26 +364,15 @@ class Handle(Resource):
 
             #Special command: Force read repair and view update.
             if key == '_update!':
+                _print("beginning of _update!")
                 try:
-                    K = request.form['K'].encode('ascii', 'ignore')
-                except:
-                    return {"result": "error", 'msg': 'System command parameter error'}, 401
-                try:
+                    K = int(request.form['K'].encode('ascii', 'ignore'))
                     proxies = request.form['proxies'].encode('ascii', 'ignore').split(",")
-                except:
-                    return {"result": "error", 'msg': 'System command parameter error'}, 402
-                try:
                     view = request.form['view'].encode('ascii', 'ignore').split(",")
-                except:
-                    return {"result": "error", 'msg': 'System command parameter error'}, 403
-                try:
                     notInView = request.form['notInView'].encode('ascii', 'ignore').split(",")
-                except:
-                    return {"result": "error", 'msg': 'System command parameter error'}, 404
-                try:
                     replicas = request.form['replicas'].encode('ascii', 'ignore').split(",")
                 except:
-                    return {"result": "error", 'msg': 'System command parameter error'}, 405
+                    return {"result": "error", 'msg': 'System command parameter error'}, 401
 
                 try:
                     _print(K)
@@ -416,8 +381,8 @@ class Handle(Resource):
                     _print(proxies)
                     _print(notInView)
                 except:
-                    return {"result": "error", 'msg': 'System command parameter error'}, 406
-                updateRatio()
+                    return {"result": "error", 'msg': 'System command parameter error'}, 401
+            
                 if isReplica:
                     for key in d:
                         readRepair(key)
@@ -428,6 +393,8 @@ class Handle(Resource):
                     replicas.pop(0)
                 if notInView[0] == '':
                     notInView.pop(0)
+                _print("end of _update!")
+                updateRatio()
                 return {"result": "success"}, 200
                 
             #Special command: Force set a node's identity as replica/proxy.
@@ -601,6 +568,7 @@ class Handle(Resource):
                 if notInView[0] == '':
                     notInView.pop(0)
                 updateRatio()
+                _print("Update Ratio called in _update!")
                 return {"result": "success"}, 200
 
             #Special command: Handles adding/deleting nodes.
@@ -660,17 +628,16 @@ class Handle(Resource):
                     notInView = sortIPs(notInView)
                     continue
                 noResp = False
-            #Try requesting primary.
             _print(response.json())
             return response.json()
 
-        def delete(self, key):
-            #Try requesting primary.
-            try:
-                response = requests.delete(http_str + mainAddr + kv_str + key)
-            except requests.exceptions.RequestException as exc: #Handle primary failure upon delete request.
-                return {'result': 'error', 'msg': 'Server unavailable'}, 500
-            return response.json()
+        # def delete(self, key):
+        #     #Try requesting primary.
+        #     try:
+        #         response = requests.delete(http_str + mainAddr + kv_str + key)
+        #     except requests.exceptions.RequestException as exc: #Handle primary failure upon delete request.
+        #         return {'result': 'error', 'msg': 'Server unavailable'}, 500
+        #     return response.json()
 
 api.add_resource(Handle, '/kv-store/<key>')
 
