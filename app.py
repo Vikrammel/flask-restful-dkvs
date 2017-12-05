@@ -63,17 +63,12 @@ def sortIPs(IPArr):
 
 # Initialize view array based on Environment Variable 'VIEW'
 if EnvView is not None:
-    view = EnvView.split(",")
-    for i in view:
-        if view.index(i) < K:
-            replicas.append(i)
-            replicas = sortIPs(replicas)
-        else:
-            proxies.append(i)
-            proxies = sortIPs(proxies)
-        
-    if IpPort in replicas:
-        isReplica = True
+    notInView = EnvView.split(",")
+    notInView = sortIPs(notInView)
+if IpPort in notInView:
+    notInView.remove(IpPort)
+view.append(IpPort)
+replicas.append(IpPort)
 else:
     view = []
 
