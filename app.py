@@ -25,7 +25,7 @@ except:
     EnvView = ''
 
 # Is this a replica or a proxy?
-isReplica = False
+isReplica = True
 # Dictionaries acting as a vector clock and timestamps. key -> local clock value/timestamp.
 vClock = {}
 storedTimeStamp = {}
@@ -415,7 +415,9 @@ class Handle(Resource):
                 except:
                     timestamp = 'test'
                     
-                
+                d[dKey] = value
+                vClock[key] = causalPayload
+                storedTimeStamp[key] = timestamp
                 return {"result":"success"}, 269
 
 
