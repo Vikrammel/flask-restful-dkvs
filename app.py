@@ -41,9 +41,18 @@ notInView = [] # Keep track of nodes not in view to see if they're back online.
 replicas = []
 proxies = []
 
+def setDict(dtemp):
+    d = dtemp
+
+
 def getReplicaDetail():
     return isReplica
 
+def printDict():
+    for k in d:
+        print(str(k))
+        print(sttr(d[k]))
+        sys.stdout.flush()
 
 def setReplicaDetail(number):
     if int(number) == 1:
@@ -182,7 +191,8 @@ def updateView(self, key):
                 try:
                     requests.put((http_str + address + kv_str + 'update_view'), data = {'ip_port': ip_payload, 'type': _type, '_systemCall': True})
                 except:
-                    pass
+                    print("failed to update view to address: " + address)
+                    sys.stdout.flush()
 
     if _type == 'add':
         # Check if IP is already in our view
@@ -223,7 +233,7 @@ def updateView(self, key):
                 view.append(ip_payload)
                 replicas = sortIPs(replicas)
                 view = sortIPs(view)  
-                requests.put(http_str + ip_payload + kv_str + '_setIsReplica!', data={'id': 1}) #tell node to be replica
+                requests.put(http_str + ip_payload + kv_str + '_setIsReplica!', data={'id': 1, 'd': json.dumps(d), 'vClock': json.dumps(vClock), 'storedTimeStamp': json.dumps(storedTimeStamp)}) #tell node to be replica
                 if debug:
                     print("New replica created.")
                     sys.stdout.flush()
@@ -300,18 +310,19 @@ def updateRatio():
    
 #read-repair function
 def readRepair(key):
-    global firstHeartBeat, replicas, proxies, view, notInView
-    for ip in replicas:
-        try:
-            response = requests.get((http_str + ip + kv_str + key), timeout=2)
-            if response[causal_payload] > vClock[key]:
-                d[key] = response[value]
-                vClock[key] = response[causal_payload]
-                timestamps[key] = response[timestamp]
-        except requests.exceptions.RequestException: #Handle no response from ip
-            removeReplica(ip)
-            notInView.append(ip)
-            notInView = sortIPs(notInView)
+    pass
+    # global firstHeartBeat, replicas, proxies, view, notInView
+    # for ip in replicas:
+    #     try:
+    #         response = requests.get((http_str + ip + kv_str + key), timeout=2)
+    #         if response[causal_payload] > vClock[key]:
+    #             d[key] = response[value]
+    #             vClock[key] = response[causal_payload]
+    #             timestamps[key] = response[timestamp]
+    #     except requests.exceptions.RequestException: #Handle no response from ip
+    #         removeReplica(ip)
+    #         notInView.append(ip)
+    #         notInView = sortIPs(notInView)
 def broadcastKey(key, value, payload, time):
     global firstHeartBeat, replicas, proxies, view, notInView
     for address in replicas:
@@ -326,7 +337,7 @@ def broadcastKey(key, value, payload, time):
             try:
                 print("Sending to " + str(address))
                 sys.stdout.flush()
-                requests.put((http_str + address + kv_str + "bc"), data = {'val': value, 'causal_payload': payload, 'timestamp': time, 'key':key, 'bc':'1'})
+                requests.put((http_str + address + kv_str + key), data = {'val': value, 'causal_payload': payload, 'timestamp': time, 'bc':'1'})
             except :
                 print("broadcast failed to " + str(address))
                 sys.stdout.flush()
@@ -379,7 +390,7 @@ class Handle(Resource):
 
         #Handles PUT request
         def put(self, key):
-            global K, view, notInView, replicas, proxies
+            global K, view, notInView, replicas, proxies, d, vClock, storedTimeStamp
             #Special command: Handles adding/deleting nodes.
             if key == 'update_view':
                 return updateView(self, key)
@@ -455,7 +466,6 @@ class Handle(Resource):
                 
             #Special command: Force set a node's identity as replica/proxy.
             if key == '_setIsReplica!':
-                global isReplica
                 try:
                     uni = request.form['id']
                     replicaDetail = uni.encode('ascii', 'ignore')
@@ -463,6 +473,21 @@ class Handle(Resource):
                     return {"result": "error", 'msg': 'ID not provided in setIsReplica'}, 403
 
                 setReplicaDetail(uni)
+
+                try: 
+                    dt = json.loads(request.form['d'])
+                    vt = json.loads(request.form['vClock'])
+                    st = json.loads(request.form['storedTimeStamp'])
+                    print("type of dt = " + str(type(dt)))
+                    print(dt)
+                    print(vt)
+                    print(st)
+                    sys.stdout.flush()
+                    d = dt
+                    vClock = vt
+                    storedTimeStamp = st
+                except:
+                    return {"result": "error", 'msg': 'Passing d failed'}, 403
                 # if replicaDetail == "0":
                 #     print("Isreplica set to FALSE")
                 #     sys.stdout.flush()
@@ -505,14 +530,15 @@ class Handle(Resource):
             try:
                 bc = int(request.form['bc'].encode('ascii', 'ignore'))
             except:
-                bc = ''
+                bc = 0
             print("!!!!!!!!!BC = " + str(bc))
             sys.stdout.flush()
-            if bc is not '':
-                clientRequest = False
+            if bc != 1:
+                clientRequest = True
                 print("!!!!!!!!!BC = " + str(bc))
                 sys.stdout.flush()
-            clientRequest = True
+            else:
+                clientRequest = False
             #clientRequest = False
             #Get attached timestamp, or set it if empty.
 
@@ -656,6 +682,14 @@ class Handle(Resource):
                     sys.stdout.flush()
                     return {"result": "error", 'msg': 'ID not provided in setIsReplica'}, 403
                 setReplicaDetail(uni)
+                if uni == 1:
+                    try:
+                        d = json.loads(request.form['d'])
+                        print(d)
+                        sys.stdout.flush()
+                    except:
+                        print("request d did not work")
+                        sys.stdout.flush()
                 # if replicaDetail == "0":
                 #     print("Isreplica set to FALSE")
                 #     sys.stdout.flush()
