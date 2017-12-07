@@ -33,17 +33,17 @@ storedTimeStamp = {}
 http_str = 'http://'
 kv_str = '/kv-store/'
 
+numberOfPartitions = -1
+partitionID = -1
+localCluster = []
 # Dictionary where key->value pairs will be stored.
 d = {}
+cDict = {}
 # Arrays to store replicas and proxies.
 view = []
 notInView = [] # Keep track of nodes not in view to see if they're back online.
 replicas = []
 proxies = []
-
-def setDict(dtemp):
-    d = dtemp
-
 
 def getReplicaDetail():
     return isReplica
@@ -78,83 +78,131 @@ def sortIPs(IPArr):
         AnsArr[j+1] = ip
     return AnsArr
 
-# Initialize view array based on Environment Variable 'VIEW'
+
 if EnvView is not None:
-    print("env view is not none")
+    print("Environment variable 'View' is not none")
     sys.stdout.flush()
     view = EnvView.split(",")
-    for i in view:
-        if view.index(i) < K:
-            replicas.append(i)
-            replicas = sortIPs(replicas)
-        else:
-            proxies.append(i)
-            proxies = sortIPs(proxies)
-        
-    if IpPort in replicas:
-        isReplica = True
-else:
-    print("env view is none")
+    numberOfPartitions = int(len(view) / K)
+    print("Number of partitions = " + str(numberOfPartitions))
     sys.stdout.flush()
-    view = []
-    view.append(IpPort)
+    tempArr = []
+    counter = 0
+    clusterCounter = 0
 
-def removeReplica(ip):
-    replicas.remove(ip)
-    view.remove(ip)
+    # loops through each address
+    for address in view:
 
-def removeProxie(ip):
-    proxies.remove(ip)
-    view.remove(ip)
+        # Checks to see if number of clusters have been fulfilled
+        # adds the rest of the address to proxies
+        if clusterCounter == numberOfPartitions:
+            proxies.append(address)
 
-def heartBeat():
-    heart = threading.Timer(3.0, heartBeat)
-    heart.daemon = True
-    heart.start()
-    global firstHeartBeat, replicas, proxies, view, notInView
-    if firstHeartBeat:
-        firstHeartBeat = False
-        return
-    if debug:
-        # print("My IP: " + str(IpPort))
-        print("View: " + str(view))
-        print("Replicas: " + str(replicas))
-        print("Proxies: " + str(proxies))
-        sys.stdout.flush()
+        # appends address to temporary array
+        tempArr.append(address)
+        counter += 1
 
-    for ip in notInView: #check if any nodes not currently in view came back online
-        # print("for notinView loop eneter")
-        # sys.stdout.flush()
-        try:
-            response = (requests.get((http_str + ip + kv_str + "get_node_details"), timeout=2)).json()
-            if response['result'] == 'success':
-                notInView.remove(ip)
-                view.append(ip)
-                view = sortIPs(view)
-        except: #Handle no response from i
-            pass
-    for ip in view:
-        # print("For IP loop Entered")
-        # sys.stdout.flush()
-        if ip != IpPort:
-            # print("ip not equal to IPPort")
-            # sys.stdout.flush()
-            try:
-                response = (requests.get((http_str + ip + kv_str + "get_node_details"), timeout=2)).json()
-            except requests.exceptions.RequestException as exc: #Handle no response from ip
-                # print("Try Failed, now inside except")
-                # sys.stdout.flush()
-                if ip in replicas:
-                    # print("in is in replicas")
-                    # sys.stdout.flush() 
-                    removeReplica(ip)
-                elif ip in proxies:
-                    # print("ip is in proxies")
-                    # sys.stdout.flush()
-                    removeProxie(ip)
-                notInView.append(ip)
-                notInView = sortIPs(notInView)
-    updateRatio()
+        # Sets cluster number
+        if address == IpPort:
+            partitionID = clusterCounter
+            print("My Cluster number is " + str(partitionID))
+        # Once counter reaches K, set the cluster dictionary with the temp array
+        # Increase cluster dictionary position, reset temp array, and counter
+        if counter == K:
+            cDict[clusterCounter] = tempArr
+            tempArr = []
+            counter = 0
+            clusterCounter += 1
+
+        # Sets local cluster and isReplica = True, if not a proxy
+    if partitionID != -1:
+        replicas = cDict[partitionID]
+        isReplica = True
+    else:
+        isReplica = False
+    
+    print(cDict)
+    print(proxies)
+    sys.stdout.flush()
+        
+
+# Initialize view array based on Environment Variable 'VIEW'
+# if EnvView is not None:
+#     print("env view is not none")
+#     sys.stdout.flush()
+#     view = EnvView.split(",")
+#     for i in view:
+#         if view.index(i) < K:
+#             replicas.append(i)
+#             replicas = sortIPs(replicas)
+#         else:
+#             proxies.append(i)
+#             proxies = sortIPs(proxies)
+        
+#     if IpPort in replicas:
+#         isReplica = True
+# else:
+#     print("env view is none")
+#     sys.stdout.flush()
+#     view = []
+#     view.append(IpPort)
+
+# def removeReplica(ip):
+#     replicas.remove(ip)
+#     view.remove(ip)
+
+# def removeProxie(ip):
+#     proxies.remove(ip)
+#     view.remove(ip)
+
+# def heartBeat():
+#     heart = threading.Timer(3.0, heartBeat)
+#     heart.daemon = True
+#     heart.start()
+#     global firstHeartBeat, replicas, proxies, view, notInView
+#     if firstHeartBeat:
+#         firstHeartBeat = False
+#         return
+#     if debug:
+#         # print("My IP: " + str(IpPort))
+#         print("View: " + str(view))
+#         print("Replicas: " + str(replicas))
+#         print("Proxies: " + str(proxies))
+#         sys.stdout.flush()
+
+#     for ip in notInView: #check if any nodes not currently in view came back online
+#         # print("for notinView loop eneter")
+#         # sys.stdout.flush()
+#         try:
+#             response = (requests.get((http_str + ip + kv_str + "get_node_details"), timeout=2)).json()
+#             if response['result'] == 'success':
+#                 notInView.remove(ip)
+#                 view.append(ip)
+#                 view = sortIPs(view)
+#         except: #Handle no response from i
+#             pass
+#     for ip in view:
+#         # print("For IP loop Entered")
+#         # sys.stdout.flush()
+#         if ip != IpPort:
+#             # print("ip not equal to IPPort")
+#             # sys.stdout.flush()
+#             try:
+#                 response = (requests.get((http_str + ip + kv_str + "get_node_details"), timeout=2)).json()
+#             except requests.exceptions.RequestException as exc: #Handle no response from ip
+#                 # print("Try Failed, now inside except")
+#                 # sys.stdout.flush()
+#                 if ip in replicas:
+#                     # print("in is in replicas")
+#                     # sys.stdout.flush() 
+#                     removeReplica(ip)
+#                 elif ip in proxies:
+#                     # print("ip is in proxies")
+#                     # sys.stdout.flush()
+#                     removeProxie(ip)
+#                 notInView.append(ip)
+#                 notInView = sortIPs(notInView)
+#     updateRatio()
 
 def updateView(self, key):
     global firstHeartBeat, replicas, proxies, view, notInView, K, IpPort
@@ -259,6 +307,9 @@ def updateView(self, key):
     if _type == 'remove':
         # Check to see if IP is in our view
         if ip_payload not in view:
+            if ip_payload in notInView:
+                notInView.remove(ip_payload)
+                return {"msg": "success", "number_of_nodes": len(view)}, 200
             return {'result': 'error', 'msg': 'Cannot remove, IP is not in view'}, 403
         
         # Check if replica
@@ -275,54 +326,54 @@ def updateView(self, key):
         return {"msg": "success", "number_of_nodes": len(view)}, 200
     return {'result': 'error', 'msg': 'Request type not valid'}, 403
 
-def updateRatio():
-    global view, replicas, proxies, isReplica
-    view = sortIPs(view)
-    for node in view:
-        # This is a replica.
-        if view.index(node) < K:
-            #print("UpdateRatio: " + node + "is in pos < K")
-            sys.stdout.flush()
-            if node not in replicas:
-                if node in proxies:
-                    proxies.remove(node)
-                replicas.append(node)
-                replicas = sortIPs(replicas)
-                #print("UpdateRatio: " + node + "added to replicas array")
-                sys.stdout.flush()
-                if node == IpPort:
-                    isReplica = True
-                    for key in d:
-                        readRepair(key)
-        # This is a proxy.
-        else:
-            #print("UpdateRatio: " + node + "is in pos >= K")
-            sys.stdout.flush()
-            if node not in proxies:
-                if node in replicas:
-                    replicas.remove(node)
-                proxies.append(node)
-                proxies = sortIPs(proxies)
-                #print("UpdateRatio: " + node + "added to replicas array")
-                sys.stdout.flush()
-                if node == IpPort:
-                    isReplica = False
+# def updateRatio():
+#     global view, replicas, proxies, isReplica
+#     view = sortIPs(view)
+#     for node in view:
+#         # This is a replica.
+#         if view.index(node) < K:
+#             #print("UpdateRatio: " + node + "is in pos < K")
+#             sys.stdout.flush()
+#             if node not in replicas:
+#                 if node in proxies:
+#                     proxies.remove(node)
+#                 replicas.append(node)
+#                 replicas = sortIPs(replicas)
+#                 #print("UpdateRatio: " + node + "added to replicas array")
+#                 sys.stdout.flush()
+#                 if node == IpPort:
+#                     isReplica = True
+#                     for key in d:
+#                         readRepair(key)
+#         # This is a proxy.
+#         else:
+#             #print("UpdateRatio: " + node + "is in pos >= K")
+#             sys.stdout.flush()
+#             if node not in proxies:
+#                 if node in replicas:
+#                     replicas.remove(node)
+#                 proxies.append(node)
+#                 proxies = sortIPs(proxies)
+#                 #print("UpdateRatio: " + node + "added to replicas array")
+#                 sys.stdout.flush()
+#                 if node == IpPort:
+#                     isReplica = False
    
 #read-repair function
 def readRepair(key):
     pass
-    # global firstHeartBeat, replicas, proxies, view, notInView
-    # for ip in replicas:
-    #     try:
-    #         response = requests.get((http_str + ip + kv_str + key), timeout=2)
-    #         if response[causal_payload] > vClock[key]:
-    #             d[key] = response[value]
-    #             vClock[key] = response[causal_payload]
-    #             timestamps[key] = response[timestamp]
-    #     except requests.exceptions.RequestException: #Handle no response from ip
-    #         removeReplica(ip)
-    #         notInView.append(ip)
-    #         notInView = sortIPs(notInView)
+    global firstHeartBeat, replicas, proxies, view, notInView
+    for ip in replicas:
+        try:
+            response = requests.get((http_str + ip + kv_str + key), timeout=2)
+            if response[causal_payload] > vClock[key]:
+                d[key] = response[value]
+                vClock[key] = response[causal_payload]
+                timestamps[key] = response[timestamp]
+        except requests.exceptions.RequestException: #Handle no response from ip
+            removeReplica(ip)
+            notInView.append(ip)
+            notInView = sortIPs(notInView)
 def broadcastKey(key, value, payload, time):
     global firstHeartBeat, replicas, proxies, view, notInView
     for address in replicas:
@@ -358,9 +409,34 @@ class Handle(Resource):
             if key == 'get_all_replicas':
                 return {"result": "success", "replicas": replicas}, 200
 
+             #Special command: Returns the ID of the partition this replica is in.
+            if key == 'get_partition_id':
+                return {"result": "success", "partition_id": partitionID}, 200
+
+            #Special command: Returns list of partition IDs.
+            if key == 'get_all_partition_ids':
+                partitionIds = []
+                for k in cDict:
+                    partitionIds.append(k)
+                return {"result": "success", "partition_id_list": partitionIds}, 200
+
+            #Special command: Returns list of replicas in the given partition.
+            if key == 'get_partition_members':
+                try:
+                    partition_id = int(request.form['partition_id'])
+                except:
+                    return {"result": "error", 'msg': 'Partition not specified'}, 403
+                #TODO: Return members of the given partition, rather then simply the local one.
+                if partition_id in cDict:
+                    return {"result": "success", "partition_members": cDict[partition_id]}, 200
+                else:
+                    return {"result": "error", 'msg': 'Partition not specified'}, 403
+
             #If key is not in dict, return error.
             if key not in d:
-                return {'result': 'error', 'msg': 'Key does not exist'}, 404
+                readRepair(key)
+                if key not in d:
+                    return {'result': 'error', 'msg': 'Key does not exist'}, 404
 
             clientRequest = False
             try:
@@ -386,7 +462,7 @@ class Handle(Resource):
             if clientRequest:
                 vClock[key] += 1
             #If key is in dict, return its corresponding value.
-            return {'result': 'success', 'value': d[key], 'node_id': IpPort, 'causal_payload': vClock[key], 'timestamp': timestamp}, 200
+            return {'result': 'success', 'value': d[key], 'partition_id': partitionID, 'causal_payload': vClock[key], 'timestamp': timestamp}, 200
 
         #Handles PUT request
         def put(self, key):
@@ -582,22 +658,12 @@ class Handle(Resource):
                     vClock[key] += 1
                     storedTimeStamp[key] = timestamp
                     broadcastKey(key, value, vClock[key], storedTimeStamp[key])
-                return {'result': 'success', 'node_id': IpPort, 'causal_payload': vClock[key], 'timestamp': storedTimeStamp[key]}, responseCode
+                return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key], 'timestamp': storedTimeStamp[key]}, responseCode
             #If key already exists, set replaced to true.
             if storedTimeStamp[key] == 0:
                 storedTimeStamp[key] = timestamp
-            return {'result': 'success', 'node_id': IpPort, 'causal_payload': vClock[key], 'timestamp': storedTimeStamp[key]}, responseCode
-            
-        #Handles DEL request
-        def delete(self, key):
-            #If key is not in dict, return error.
-            if key not in d:
-                return {'result': 'error', 'msg': 'Key does not exist'}, 404
+            return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key], 'timestamp': storedTimeStamp[key]}, responseCode
 
-            #If key is in dict, delete key->value pair.
-            del d[key]
-            return {'result': 'Success', 'node_id': IP, 'causal_payload': vClock[key], 'timestamp': timestamp}, 200
-        
     else:
         #Handle requests from forwarding instance.
         def get(self, key):
@@ -607,9 +673,13 @@ class Handle(Resource):
                 if isReplica == True:
                     answer = "Yes"
                 return {"result": "success", "replica": answer}, 200
-                        #Special command: Returns list of replicas.
+            #Special command: Returns list of replicas.
             if key == 'get_all_replicas':
                 return {"result": "success", "replicas": replicas}, 200
+
+            #Special command: Returns -1, since this is a proxy, not a replica.
+            if key == 'get_partition_id':
+                return {"result": "success", "partition_id": -1}, 200
 
             #Try to retrieve timestamp and cp of read request.
             try:
@@ -756,5 +826,5 @@ api.add_resource(Handle, '/kv-store/<key>')
 
 if __name__ == "__main__":
     localAddress = IpPort.split(":")
-    heartBeat()
+    # heartBeat()
     app.run(host=localAddress[0], port=localAddress[1], threaded=True)
