@@ -262,17 +262,23 @@ def updateRatio():
 
     newPartition = int(view.index(IpPort)/K)
     proxyPartition = int(len(view)/K)
-    # The partition this node belongs to had changed.
-    if partition != newPartition:
-        partition = newPartition
-        replicas = []
-        d = {} # Potentially dangerous. Alternative?
-        if partition >= proxyPartition:
-            isReplica = False
-            proxies.append(IpPort)
-            proxies = sortIPs(proxies)
-        else:
-            isReplica = True
+
+    if len(view) >= K:
+        _print("partition: " + str(partition) + newline +
+                "newPartition: " + str(newPartition) + newline +
+                "proxy partition: " + str(proxyPartition))
+        # The partition this node belongs to had changed.
+        if partition != newPartition:
+            partition = newPartition
+            replicas = []
+            d = {} # Potentially dangerous. Alternative?
+            if partition >= proxyPartition:
+                isReplica = False
+                proxies.append(IpPort)
+                proxies = sortIPs(proxies)
+            else:
+                isReplica = True
+
     for node in view:
         # This is a proxy.
         if int(view.index(node)/K) >= proxyPartition:
@@ -282,14 +288,25 @@ def updateRatio():
                 proxies.append(node)
                 proxies = sortIPs(proxies)
         # This is a replica within the same partition.
-        elif isReplica and int(view.index(node)/K) == partition:
-            if node not in replicas:
+        elif int(view.index(node)/K) == partition:
+            if node == IpPort:
+                    isReplica = True
+                    if node not in replicas:
+                        replicas.append(node)
+                        replicas = sortIPs(replicas)
+                        if node in proxies:
+                            proxies.remove(node)
+                    updateDatabase()
+                    pass
+            if isReplica and (node not in replicas):
                 if node in proxies:
                     proxies.remove(node)
                 replicas.append(node)
                 replicas = sortIPs(replicas)
-                if node == IpPort:
-                    updateDatabase()
+        else:
+            if node in proxies:
+                proxies.remove(node)
+
    
 #read-repair function
 def readRepair(key):
