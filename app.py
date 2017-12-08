@@ -169,11 +169,11 @@ def updateDatabase():
             continue
         try:
             #TODO: create _getAll! function, returning [d, vClock, storedTimeStamp]
-            response = requests.get((http_str + ip + kv_str + '_getAll!'), timeout=5)
-            responseD = json.loads(response['value'])
+            response = (requests.get((http_str + ip + kv_str + '_getAllKeys!'), timeout=5)).json()
+            responseD = json.loads(response['dict'])
             responseCausal = json.loads(response['causal_payload'])
             responseTime = json.loads(response['timestamp'])
-            for key in json.loads(response['value']):
+            for key in json.loads(response['dict']):
                 if (d.get(key) == None or responseCausal[key] > vClock[key] or
                    (responseCausal[key] == vClock[key] and responseTime[key] > storedTimeStamp[key])):
                     d[key] = responseD[key].encode('ascii', 'ignore')
@@ -217,7 +217,8 @@ def updateView(self, key):
             if address == IpPort or address == ip_payload:
                 continue
             try:
-                requests.put((http_str + address + kv_str + 'update_view'), data = {'ip_port': ip_payload, 'type': _type, '_systemCall': True})
+                requests.put((http_str + address + kv_str + 'update_view'),
+                    data = {'ip_port': ip_payload, 'type': _type, '_systemCall': True})
             except:
                 pass
 
@@ -226,8 +227,10 @@ def updateView(self, key):
         view.append(ip_payload)
         view = sortIPs(view)
         if sysCall == '':
-            requests.put(http_str + ip_payload + kv_str + '_update!', data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "proxies": ','.join(proxies)})
-        return {"msg": "success", "partition_id": int(view.index(ip_payload)/K), "number_of_partitions": int(len(view)/K)}, 200
+            requests.put(http_str + ip_payload + kv_str + '_update!', 
+                data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "proxies": ','.join(proxies)})
+        return {"msg": "success", "partition_id": int(view.index(ip_payload)/K), 
+            "number_of_partitions": int(len(view)/K)}, 200
 
     elif _type == 'remove':
         # Check to see if IP is in our view
@@ -317,7 +320,8 @@ def broadcastKey(key, value, payload, time):
             try:
                 print("Sending to " + str(address))
                 sys.stdout.flush()
-                requests.put((http_str + address + kv_str + key), data = {'val': value, 'causal_payload': payload, 'timestamp': time, 'bc':'1'})
+                requests.put((http_str + address + kv_str + key), 
+                    data = {'val': value, 'causal_payload': payload, 'timestamp': time, 'bc':'1'})
             except :
                 print("broadcast failed to " + str(address))
                 sys.stdout.flush()
@@ -328,6 +332,7 @@ class Handle(Resource):
     if isReplica:
         #Handles GET request
         def get(self, key):
+            global d, vClock, storedTimeStamp
             #Special command: Returns if node is a replica.
             if key == 'get_node_details':
                 answer = "No"
@@ -361,8 +366,9 @@ class Handle(Resource):
                 else:
                     return {"result": "error", 'msg': 'Partition not specified'}, 403
 
-            if key == '_getAll!':
-                return {"result": "success", "value": json.dumps(d), "clock": json.dumps(vClock), "time": json.dumps(storedTimeStamp)}, 200
+            if key == '_getAllKeys!':
+                return {"result": "success", "dict": json.dumps(d), "causal_payload": json.dumps(vClock),
+                    "timestamp": json.dumps(storedTimeStamp)}, 200
 
             #If key is not in dict, return error.
             if key not in d:
@@ -394,7 +400,8 @@ class Handle(Resource):
             if clientRequest:
                 vClock[key] += 1
             #If key is in dict, return its corresponding value.
-            return {'result': 'success', 'value': d[key], 'partition_id': partitionID, 'causal_payload': vClock[key], 'timestamp': timestamp}, 200
+            return {'result': 'success', 'value': d[key], 'partition_id': partitionID, 
+                'causal_payload': vClock[key], 'timestamp': timestamp}, 200
 
         #Handles PUT request
         def put(self, key):
@@ -590,11 +597,13 @@ class Handle(Resource):
                     vClock[key] += 1
                     storedTimeStamp[key] = timestamp
                     broadcastKey(key, value, vClock[key], storedTimeStamp[key])
-                return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key], 'timestamp': storedTimeStamp[key]}, responseCode
+                return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key],
+                    'timestamp': storedTimeStamp[key]}, responseCode
             #If key already exists, set replaced to true.
             if storedTimeStamp[key] == 0:
                 storedTimeStamp[key] = timestamp
-            return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key], 'timestamp': storedTimeStamp[key]}, responseCode
+            return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key],
+                'timestamp': storedTimeStamp[key]}, responseCode
 
     else:
         #Handle requests from forwarding instance.
@@ -630,7 +639,8 @@ class Handle(Resource):
                     return {'result': 'error', 'msg': 'Server unavailable'}, 500
                 repIp = random.choice(replicas)
                 try:
-                    response = requests.get(http_str + repIp + kv_str + key, data={'causal_payload': causalPayload, 'timestamp': timestamp})
+                    response = requests.get(http_str + repIp + kv_str + key,
+                        data={'causal_payload': causalPayload, 'timestamp': timestamp})
                 except requests.exceptions.RequestException as exc: #Handle replica failure
                     removeReplica()
                     notInView.append(ip)
@@ -735,7 +745,8 @@ class Handle(Resource):
                     return {'result': 'error', 'msg': 'Server unavailable'}, 500
                 repIp = random.choice(replicas)
                 try:
-                    response = requests.put((http_str + repIp + kv_str + key), data = {'val': value, 'causal_payload': causalPayload })
+                    response = requests.put((http_str + repIp + kv_str + key), 
+                        data = {'val': value, 'causal_payload': causalPayload })
                 except requests.exceptions.RequestException as exc: #Handle replica failure
                     removeReplica(repIp)
                     notInView.append(ip)
