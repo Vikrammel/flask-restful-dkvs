@@ -224,11 +224,14 @@ def updateView(self, key):
 
     if _type == 'add':
         # Check if IP is already in our view
+        if ip_payload in view:
+            return {'result': 'error', 'msg':'IP already inside view'}, 403
         view.append(ip_payload)
         view = sortIPs(view)
         if sysCall == '':
             requests.put(http_str + ip_payload + kv_str + '_update!', 
                 data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "proxies": ','.join(proxies)})
+        updateRatio()
         return {"msg": "success", "partition_id": int(view.index(ip_payload)/K), 
             "number_of_partitions": int(len(view)/K)}, 200
 
@@ -247,6 +250,12 @@ def updateView(self, key):
         # Check if proxie
         if ip_payload in proxies:
             removeProxie(ip_payload)
+        
+        if ip_payload in view:
+            view.remove(ip_payload)
+            if ip_payload in notInView:
+                notInView.remove(ip_payload)
+        
         requests.put(http_str + ip_payload + kv_str + '_die!', data = {})
         # Update Replica/Proxie Ratio if needed
         updateRatio()
@@ -272,12 +281,13 @@ def updateRatio():
             partition = newPartition
             replicas = []
             d = {} # Potentially dangerous. Alternative?
-            if partition >= proxyPartition:
-                isReplica = False
-                proxies.append(IpPort)
-                proxies = sortIPs(proxies)
-            else:
-                isReplica = True
+        if partition >= proxyPartition and IpPort not in proxies:
+            isReplica = False
+            proxies.append(IpPort)
+            proxies = sortIPs(proxies)
+            replicas = []
+        else:
+            isReplica = True
 
     for node in view:
         # This is a proxy.
@@ -306,6 +316,8 @@ def updateRatio():
         else:
             if node in proxies:
                 proxies.remove(node)
+            if node in replicas:
+                replicas.remove(node)
 
    
 #read-repair function
@@ -474,7 +486,6 @@ class Handle(Resource):
                     K = int(request.form['K'].encode('ascii', 'ignore'))
                     view = request.form['view'].encode('ascii', 'ignore').split(",")
                     notInView = request.form['notInView'].encode('ascii', 'ignore').split(",")
-                    replicas = request.form['replicas'].encode('ascii', 'ignore').split(",")
                     proxies = request.form['proxies'].encode('ascii', 'ignore').split(",")
 
                 except:
@@ -685,7 +696,6 @@ class Handle(Resource):
                     K = int(request.form['K'].encode('ascii', 'ignore'))
                     view = request.form['view'].encode('ascii', 'ignore').split(",")
                     notInView = request.form['notInView'].encode('ascii', 'ignore').split(",")
-                    replicas = request.form['replicas'].encode('ascii', 'ignore').split(",")
                     proxies = request.form['proxies'].encode('ascii', 'ignore').split(",")
 
                 except:
