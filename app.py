@@ -4,15 +4,27 @@
 from flask import Flask
 from flask import request, abort, jsonify, json
 from flask_restful import Resource, Api
-import re, sys, os, requests, datetime, threading, random
+import re, sys, os, requests, datetime, threading, random, bisect
+from hashlib import md5
 
 app = Flask(__name__)
 api = Api(app)
 newline = "\n"
 # Debug printing boolean.
 debug = True
+showHb = True
+showTempD = True
 firstHeartBeat = True
 
+def _tempPrint(text):
+    if showTempD:
+        print (text)
+        sys.stdout.flush()
+
+def _printHb(text):
+    if showHb:
+        print (text)
+        sys.stdout.flush()
 
 def _print(text):
     if debug:
@@ -38,6 +50,8 @@ isReplica = True
 # Dictionaries acting as a vector clock and timestamps. key -> local clock value/timestamp.
 vClock = {}
 storedTimeStamp = {}
+hashRing=[] #sorted ring of hashes
+hashClusterMap={} #maps buckets to clusters
 # String to prepend onto URL.
 http_str = 'http://'
 kv_str = '/kv-store/'
@@ -133,15 +147,15 @@ def heartBeat():
     heart = threading.Timer(3.0, heartBeat)
     heart.daemon = True
     heart.start()
-    global firstHeartBeat, replicas, proxies, view, notInView
+    global firstHeartBeat, replicas, proxies, view, notInView, hashRing, K
     if firstHeartBeat:
         firstHeartBeat = False
         return
-    if debug:
-        _print("My IP: " + str(IpPort) + newline +
-            "View: " + str(view) + newline +
-            "Replicas: " + str(replicas) + newline +
-            "Proxies: " + str(proxies))
+
+    _printHb("My IP: " + str(IpPort) + newline +
+    "View: " + str(view) + newline +
+    "Replicas: " + str(replicas) + newline +
+    "Proxies: " + str(proxies))
 
     for ip in notInView: #check if any nodes not currently in view came back online
         try:
@@ -150,6 +164,7 @@ def heartBeat():
                 notInView.remove(ip)
                 view.append(ip)
                 view = sortIPs(view)
+                #updateHashRing()
         except: #Handle no response from i
             pass
     for ip in view:
@@ -163,10 +178,35 @@ def heartBeat():
                     removeProxie(ip)
                 notInView.append(ip)
                 notInView = sortIPs(notInView)
+                #updateHashRing()
     updateRatio()
     print("reps " + str(replicas))
     print("prox " + str(proxies))
     sys.stdout.flush()
+
+def updateHashRing():
+    global cDict, K, view, hashClusterMap, hashRing
+    cSet = set()
+    hasher = md5()
+
+    #sort view and update cDict off of view
+    view = sortIPs(view)
+    for node in view:
+        clusterNum = view.index(node)/int(K)
+        cDict[node] = clusterNum
+
+    #make a set of unique vals (which are clusterNumbers) from cDict
+    for val in cDict.values():
+        cSet.add(val)
+
+    #traverse through set to generate 250 buckets for each clusters
+    hashRing = []
+    hashClusterMap = []
+    for cIndex in cSet:
+        for j in range(250): #generate 250 buckets per cluster
+            hasher.update("hash string" + str(cIndex) + str(j))
+            bisect.insort(hashRing, hasher.hexdigest())
+            hashClusterMap[hasher.hexdigest()] = cIndex
 
 def updateDatabase():
     global replicas, notInView
@@ -345,6 +385,8 @@ def updateRatio():
                 proxies.remove(node)
             if node in replicas:
                 replicas.remove(node)
+    updateHashRing() #initially called it here, seemes excessive, 
+    # calling only when view[] and notInView change now (in heartbeat)
 
    
 #read-repair function
@@ -362,6 +404,7 @@ def readRepair(key):
             removeReplica(ip)
             notInView.append(ip)
             notInView = sortIPs(notInView)
+
 def broadcastKey(key, value, payload, time):
     global firstHeartBeat, replicas, proxies, view, notInView
     for address in view:
