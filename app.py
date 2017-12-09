@@ -177,8 +177,8 @@ def updateDatabase():
                 if (d.get(key) == None or responseCausal[key] > vClock[key] or
                    (responseCausal[key] == vClock[key] and responseTime[key] > storedTimeStamp[key])):
                     d[key] = responseD[key].encode('ascii', 'ignore')
-                    vClock[key] = responseCausal[key].encode('ascii', 'ignore')
-                    timestamps[key] = responseTime[key].encode('ascii', 'ignore')
+                    vClock[key] = responseCausal[key]
+                    storedTimeStamp[key] = responseTime[key]
         except requests.exceptions.RequestException: #Handle no response from ip
             _print("updateDatabase timeout occured.")
             removeReplica(ip)
@@ -232,7 +232,7 @@ def updateView(self, key):
             requests.put(http_str + ip_payload + kv_str + '_update!', 
                 data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "proxies": ','.join(proxies)})
         updateRatio()
-        return {"msg": "success", "partition_id": int(view.index(ip_payload)/K), 
+        return {"result": "success", "partition_id": int(view.index(ip_payload)/K), 
             "number_of_partitions": int(len(view)/K)}, 200
 
     elif _type == 'remove':
@@ -242,7 +242,7 @@ def updateView(self, key):
                 return {'result': 'error', 'msg': 'Cannot remove, IP is not in view'}, 403
             else:
                 notInView.remove(ip_payload)
-                return {"msg": "success", "number_of_partitions": int(len(view)/K)}, 200
+                return {"result": "success", "number_of_partitions": int(len(view)/K)}, 200
         
         # Check if replica
         if ip_payload in replicas:
@@ -256,14 +256,17 @@ def updateView(self, key):
             if ip_payload in notInView:
                 notInView.remove(ip_payload)
         
-        requests.put(http_str + ip_payload + kv_str + '_die!', data = {})
+        # requests.put(http_str + ip_payload + kv_str + '_die!', data = {})
         # Update Replica/Proxie Ratio if needed
         updateRatio()
 
         if ip_payload in notInView:
             notInView.remove(ip_payload)
-        return {"msg": "success", "number_of_partitions": int(len(view)/K)}, 200
+        return {"result": "success", "number_of_partitions": int(len(view)/K)}, 200
     return {'result': 'error', 'msg': 'Request type not valid'}, 403
+
+def putKey(self, key):
+    pass
 
 def updateRatio():
     global view, replicas, proxies, partition, isReplica
@@ -337,8 +340,8 @@ def readRepair(key):
             notInView = sortIPs(notInView)
 def broadcastKey(key, value, payload, time):
     global firstHeartBeat, replicas, proxies, view, notInView
-    for address in replicas:
-        if address != IpPort:
+    for address in view:
+        if address != IpPort and address not in proxies:
             # print("Address: " + str(address)+ " Address type: " + str(type(address)))
             # print("IpPort: " + str(IpPort)+ " IpPort type: " + str(type(IpPort)))
             # print("KEY: " + str(key)+ " Address type: " + str(type(key)))
@@ -362,27 +365,19 @@ class Handle(Resource):
         #Handles GET request
         def get(self, key):
             global d, vClock, storedTimeStamp
+            
             #Special command: Returns if node is a replica.
             if key == 'get_node_details':
                 answer = "No"
                 if isReplica == True:
                     answer = "Yes"
                 return {"result": "success", "replica": answer}, 200
-            #Special command: Returns list of replicas.
-            if key == 'get_all_replicas':
-                return {"result": "success", "replicas": replicas}, 200
-
-             #Special command: Returns the ID of the partition this replica is in.
+            #Special command: Returns the ID of the partition this replica is in.
             if key == 'get_partition_id':
-                return {"result": "success", "partition_id": partitionID}, 200
-
+                return {"result": "success", "partition_id": partition}, 200
             #Special command: Returns list of partition IDs.
             if key == 'get_all_partition_ids':
-                partitionIds = []
-                for k in cDict:
-                    partitionIds.append(k)
-                return {"result": "success", "partition_id_list": partitionIds}, 200
-
+                return {"result": "success", "partition_id_list": range(0, int(len(view)/K))}, 200
             #Special command: Returns list of replicas in the given partition.
             if key == 'get_partition_members':
                 try:
@@ -390,10 +385,7 @@ class Handle(Resource):
                 except:
                     return {"result": "error", 'msg': 'Partition not specified'}, 403
                 #TODO: Return members of the given partition, rather then simply the local one.
-                if partition_id in cDict:
-                    return {"result": "success", "partition_members": cDict[partition_id]}, 200
-                else:
-                    return {"result": "error", 'msg': 'Partition not specified'}, 403
+                return {"result": "success", "partition_members": replicas}, 200
 
             if key == '_getAllKeys!':
                 return {"result": "success", "dict": json.dumps(d), "causal_payload": json.dumps(vClock),
@@ -429,7 +421,7 @@ class Handle(Resource):
             if clientRequest:
                 vClock[key] += 1
             #If key is in dict, return its corresponding value.
-            return {'result': 'success', 'value': d[key], 'partition_id': partitionID, 
+            return {'result': 'success', 'value': d[key], 'partition_id': partition, 
                 'causal_payload': vClock[key], 'timestamp': timestamp}, 200
 
         #Handles PUT request
@@ -439,46 +431,30 @@ class Handle(Resource):
             if key == 'update_view':
                 return updateView(self, key)
 
+            # Handles an incoming broadcast from another node
             if key == 'bc':
-                try:
-                    print("1!!!!!!!!!")
-                    sys.stdout.flush()
-                except:
-                    pass
+                _print("Incoming Broadcast...")
                 try:
                     value = request.form['val'].encode('ascii', 'ignore')
-                    print("2!!!!!!!!!")
-                    sys.stdout.flush()
                 except:
-                    value = 'test'
+                    _print("Value not succesfully retrieved")
                 try:
                     causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
-                    print("3!!!!!!!!!")
-                    sys.stdout.flush()
                 except:
-                    causalPayload = 'test'
+                    _print("Causal Payload not succesfully retrieved")
                 try:
                     dKey = request.form['key'].encode('ascii', 'ignore')
-                    print("4!!!!!!!!!")
-                    sys.stdout.flush()
                 except:
-                    dKey = 'test'
+                    _print("Key not succesfully retrieved")
                 try:
                     timestamp = request.form['timestamp']
-                    print("5!!!!!!!!!")
-                    sys.stdout.flush()
                 except:
-                    timestamp = 'test'
+                    _print("Timestamp not succesfully retrieved")
                     
                 d[dKey] = value
                 vClock[key] = causalPayload
                 storedTimeStamp[key] = timestamp
                 return {"result":"success"}, 269
-
-
-
-            print("TEST!!!!!!!!!")
-            sys.stdout.flush()
 
             #Special command: Force read repair and view update.
             if key == '_update!':
@@ -493,8 +469,6 @@ class Handle(Resource):
 
                 if proxies[0] == '':
                     proxies.pop(0)
-                if replicas[0] == '':
-                    replicas.pop(0)
                 if notInView[0] == '':
                     notInView.pop(0)
                 if view[0] == '':
@@ -625,12 +599,12 @@ class Handle(Resource):
                     vClock[key] += 1
                     storedTimeStamp[key] = timestamp
                     broadcastKey(key, value, vClock[key], storedTimeStamp[key])
-                return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key],
+                return {'result': 'success', 'partition_id': partition, 'causal_payload': vClock[key],
                     'timestamp': storedTimeStamp[key]}, responseCode
             #If key already exists, set replaced to true.
             if storedTimeStamp[key] == 0:
                 storedTimeStamp[key] = timestamp
-            return {'result': 'success', 'partition_id': partitionID, 'causal_payload': vClock[key],
+            return {'result': 'success', 'partition_id': partition, 'causal_payload': vClock[key],
                 'timestamp': storedTimeStamp[key]}, responseCode
 
     else:
