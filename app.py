@@ -4,8 +4,11 @@
 from flask import Flask
 from flask import request, abort, jsonify, json
 from flask_restful import Resource, Api
-import re, sys, os, requests, datetime, threading, random, bisect
+import re, sys, os, requests, datetime, threading, random, bisect, logging
 from hashlib import md5
+
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 api = Api(app)
@@ -30,6 +33,13 @@ def _print(text):
     if debug:
         print (text)
         sys.stdout.flush()
+
+# def isNumber(n):
+#     try:
+#         int(n)
+#         return True
+#     except ValueError:
+#         return False
 
 # Get expected environment variables.
 IpPort = os.environ.get('IPPORT')
@@ -259,7 +269,7 @@ def checkKeyHash(key):
 
 
 def updateDatabase():
-    global replicas, notInView
+    global replicas, notInView, d, vClock, storedTimeStamp
     for ip in replicas:
         if ip == IpPort:
             continue
@@ -445,7 +455,7 @@ def updateRatio():
 #read-repair function
 def readRepair(key):
     pass
-    global firstHeartBeat, replicas, proxies, view, notInView
+    global firstHeartBeat, replicas, proxies, view, notInView, d, vClock, storedTimeStamp
     for ip in replicas:
         try:
             response = requests.get((http_str + ip + kv_str + key), timeout=2)
@@ -535,6 +545,10 @@ class Handle(Resource):
                 if causalPayload is None:
                     if vClock[key] is None:
                         vClock[key] = 0
+                #     else:
+                #         vClock[key] = causalPayload
+                # elif vClock[key] < int(causalPayload):
+                #     readRepair(key)
                 #Increment vector clock when client get operation succeeds.
                 if clientRequest:
                     vClock[key] += 1
@@ -704,6 +718,8 @@ class Handle(Resource):
                 causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
             except:
                 causalPayload = ''
+            # if not isNumber(causalPayload):
+            #     causalPayload = ''
             try:
                 key = key.encode('ascii', 'ignore')
             except:
@@ -763,6 +779,7 @@ class Handle(Resource):
                         if key in storedTimeStamp:
                             if storedTimeStamp[key] < timestamp:
                                 d[key] = value
+                                # storedTimeStamp[key] = timestamp
                             elif storedTimeStamp[key] == timestamp:
                                 if d[key] < value:
                                     d[key] = value
@@ -792,7 +809,7 @@ class Handle(Resource):
                         repsInDestCluster.append(node)
                 for node in repsInDestCluster:
                     try:
-                        response = requests.put((http_str + repIp + kv_str + key), 
+                        response = requests.put((http_str + node + kv_str + key), 
                             data = {'val': value, 'causal_payload': causalPayload })
                     except requests.exceptions.RequestException as exc: #Handle replica failure
                         view.remove(node)
@@ -880,7 +897,7 @@ class Handle(Resource):
                     repsInDestCluster.append(node)
             for node in repsInDestCluster:
                 try:
-                    response = requests.put((http_str + repIp + kv_str + key), 
+                    response = requests.put((http_str + node + kv_str + key), 
                         data = {'val': value, 'causal_payload': causalPayload })
                 except requests.exceptions.RequestException as exc: #Handle replica failure
                     view.remove(node)
