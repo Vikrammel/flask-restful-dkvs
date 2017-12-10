@@ -24,7 +24,7 @@ def _print(text, id=''):
         sys.stdout.flush()
 def isNumber(n):
     try:
-        float(n)
+        int(n)
         return True
     except ValueError:
         return False
@@ -50,6 +50,7 @@ kv_str = '/kv-store/'
 
 numberOfPartitions = -1
 partition = -1
+localCluster = []
 # Dictionary where key->value pairs will be stored.
 d = {}
 cDict = {}
@@ -83,22 +84,22 @@ def setReplicaDetail(number):
 
 # Cleans empty strings out of our arrays...
 def cleanArrays():
-    if len(view) > 0
+    if len(view) > 0:
         while view[0] == '':
             view.pop(0)
             if len(view) == 0:
                 break
-    if len(replicas) > 0
+    if len(replicas) > 0:
         while replicas[0] == '':
             replicas.pop(0)
             if len(replicas) == 0:
                 break
-    if len(proxies) > 0
+    if len(proxies) > 0:
         while proxies[0] == '':
             proxies.pop(0)
             if len(proxies) == 0:
                 break
-    if len(notInView) > 0
+    if len(notInView) > 0:
         while notInView[0] == '':
             notInView.pop(0)
             if len(notInView) == 0:
@@ -132,12 +133,16 @@ if IpPort in notInView:
 view.append(IpPort)
 
 def removeReplica(ip):
-    replicas.remove(ip)
-    view.remove(ip)
+    if ip in replicas:
+        replicas.remove(ip)
+    if ip in view:
+        view.remove(ip)
 
 def removeProxie(ip):
-    proxies.remove(ip)
-    view.remove(ip)
+    if ip in proxies:
+        proxies.remove(ip)
+    if ip in view:
+        view.remove(ip)
 
 def die(exitCode):
     sys.exit(exitCode)
@@ -146,7 +151,7 @@ def heartBeat():
     heart = threading.Timer(3.0, heartBeat)
     heart.daemon = True
     heart.start()
-    global firstHeartBeat, replicas, proxies, view, notInView
+    global firstHeartBeat, replicas, proxies, view, notInView, hashRing
     if firstHeartBeat:
         firstHeartBeat = False
         return
@@ -179,37 +184,57 @@ def heartBeat():
     #updateHashRing()
     updateRatio()
     _print("reps " + str(replicas), 'Hb')
-    _print("prox " + str(proxies), 'Hb')
+    _print("prox " + str(proxies), 'Hb') 
+
+def checkKeyHash(key):
+    #updateHashRing()
+    global cDict, K, view, hashClusterMap, hashRing, partition
+    hasher = md5()
+
+    hasher.update(key)
+    ringIndex = bisect.bisect(hashRing, hasher.hexdigest())
+    if ringIndex > (len(hashRing) - 1):
+        ringIndex = len(hashRing) - 1
+    elif ringIndex < 0:
+        ringIndex = 0
+    ringHash = hashRing[ringIndex]
+    return hashClusterMap[ringHash] #returns which cluster key should be put to/got from
 
 def updateHashRing():
     global cDict, K, view, hashClusterMap, hashRing
     cSet = set()
     hasher = md5()
-
-    #sort view and update cDict off of view
-    view = sortIPs(view)
-    for node in view:
-        clusterNum = view.index(node)/int(K)
-        cDict[node] = clusterNum
+    updateCDict()
 
     #make a set of unique vals (which are clusterNumbers) from cDict
     for val in cDict.values():
+        if val == int(len(view)/K):
+            continue
         cSet.add(val)
 
     #traverse through set to generate 250 buckets for each clusters
     hashRing = []
-    hashClusterMap = []
+    hashClusterMap = {}
     for cIndex in cSet:
         for j in range(250): #generate 250 buckets per cluster
             hasher.update("hash string" + str(cIndex) + str(j))
             bisect.insort(hashRing, hasher.hexdigest())
             hashClusterMap[hasher.hexdigest()] = cIndex
 
+def updateCDict():
+    #sort view and update cDict off of view
+    global view, cDict
+    view = sortIPs(view)
+    for node in view:
+        clusterNum = view.index(node)/int(K)
+        cDict[node] = clusterNum
+    for node in cDict.keys():
+        if node not in view:
+            cDict.pop(node, None)
+
 def updateDatabase():
     global replicas, notInView, d, vClock, storedTimeStamp
     for ip in replicas:
-    updateHashRing() #initially called it here, seemes excessive,
-    # calling only when view[] and notInView change now (in heartbeat)
         if ip == IpPort:
             continue
         try:
@@ -368,6 +393,8 @@ def updateRatio():
                 proxies.remove(node)
             if node in replicas:
                 replicas.remove(node)
+    updateHashRing() #initially called it here, seemes excessive, 
+    # calling only when view[] and notInView change now (in heartbeat)
 
 #read-repair function
 def readRepair(key):
@@ -379,10 +406,10 @@ def readRepair(key):
             response = requests.get((http_str + ip + kv_str + key), timeout=2)
             try:
                 responseD = response['value']
+                responseCausal = response['causal_payload']
+                responseTime = response['timestamp']
             except:
                 continue
-            responseCausal = response['causal_payload']
-            responseTime = response['timestamp']
             if (d.get(key) == None or responseCausal > vClock[key] or
                (responseCausal == vClock[key] and responseTime > storedTimeStamp[key]) or
                (responseTime == storedTimeStamp[key] and responseD > d[key])):
@@ -401,10 +428,11 @@ def broadcastKey(key, value, payload, time):
             try:
                 _print("Sending to " + str(address), 'Bc')
                 requests.put((http_str + address + kv_str + key), 
-                    data = {'val': value, 'causal_payload': payload, 'timestamp': time, 'bc': '1'})
+                    data = {'val': value, 'causal_payload': payload, 'timestamp': time})
             except :
                 _print("broadcast failed to " + str(address), 'Bc')
-                # removeReplica(address)
+                removeReplica(address)
+                notInView.append(address)
 
 def getPartition(num):
     partitionStart = num*K
@@ -418,12 +446,54 @@ def getPartition(num):
             members.append(node)
     return members
 
+def forwardGet(cluster, key, causalPayload, timestamp):
+    #Try requesting random replicas
+    noResp = True
+    dataCluster = getPartition(cluster)
+    while noResp:
+        if dataCluster is None:
+            return {'result': 'error', 'msg': 'Server unavailable'}, 500
+        repIp = random.choice(dataCluster)
+        try:
+            response = requests.get(http_str + repIp + kv_str + key,
+                data = {'causal_payload': causalPayload, 'timestamp': timestamp})
+        except requests.exceptions.RequestException as exc: #Handle replica failure
+            dataCluster.remove(repIp)
+            removeReplica(repIp)
+            notInView.append(repIp)
+            notInView = sortIPs(notInView)
+            continue
+        noResp = False
+    #_print(response.json(), 'Fg')
+    return response.json()
+
+def forwardPut(cluster, key, causalPayload, timestamp):
+    #Try requesting random replicas
+    noResp = True
+    dataCluster = getPartition(cluster)
+    while noResp:
+        if dataCluster is None:
+            return {'result': 'error', 'msg': 'Server unavailable'}, 500
+        repIp = random.choice(dataCluster)
+        try:
+            response = requests.put((http_str + repIp + kv_str + key), 
+                data = {'val': value, 'causal_payload': causalPayload, 'timestamp': timestamp})
+        except requests.exceptions.RequestException as exc: #Handle replica failure
+            dataCluster.remove(repIp)
+            removeReplica(repIp)
+            notInView.append(repIp)
+            notInView = sortIPs(notInView)
+            continue
+        noResp = False
+    #_print(response.json(), 'Fp')
+    return response.json()
+
 class Handle(Resource):
     #Handles GET request
     def get(self, key):
+        global d, vClock, storedTimeStamp, halfNode, partition, cDict, K, notInView
         if getReplicaDetail():
             _print("Replica request\n\n", 'Gr')
-            global d, vClock, storedTimeStamp, halfNode
             
             #Special command: Returns if node is a replica.
             if key == 'get_node_details':
@@ -449,7 +519,20 @@ class Handle(Resource):
                 if halfNode == True:
                     return {"result": "half"}, 207
                 return {"result": "success", "dict": json.dumps(d), "causal_payload": json.dumps(vClock),
-                    "timestamp": json.dumps(storedTimeStamp)}, 200
+                    "timestamp": json.dumps(storedTimeStamp)}, 200 
+
+            whichCluster = checkKeyHash(key) #cluster the key should go into found by hashing
+            if whichCluster != partition: #need to forward get to different cluster
+                try:
+                    causalPayload = request.form['causal_payload']
+                except:
+                    causalPayload = ''
+                try:
+                    timestamp = request.form['timestamp']
+                except:
+                    timestamp = ''
+                response = forwardGet(whichCluster, key, causalPayload, timestamp)
+                return response.json()
 
             #If key is not in dict, return error.
             if key not in d:
@@ -508,23 +591,7 @@ class Handle(Resource):
             except:
                 causalPayload = ''
                 pass
-            #Try requesting random replicas
-            noResp = True
-            dataCluster = getPartition(0) # TODO: Change this to direct to correct partition rather then '0'.
-            while noResp:
-                if dataCluster is None:
-                    return {'result': 'error', 'msg': 'Server unavailable'}, 500
-                repIp = random.choice(dataCluster)
-                try:
-                    response = requests.get(http_str + repIp + kv_str + key,
-                        data = {'causal_payload': causalPayload, 'timestamp': timestamp})
-                except requests.exceptions.RequestException as exc: #Handle replica failure
-                    dataCluster.remove(repIp)
-                    view.remove(repIp)
-                    notInView.append(repIp)
-                    notInView = sortIPs(notInView)
-                    continue
-                noResp = False
+            response = forwardGet(checkKeyHash(key), key, causalPayload, timestamp)
             _print(response.json(), 'Gp')
             return response.json()
 
@@ -590,6 +657,15 @@ class Handle(Resource):
             #Restricts value to a maximum of 1Mbyte.
             if sys.getsizeof(value) > 1000000:
                 return {'result': 'error', 'msg': 'Object too large. Size limit is 1MB'}, 403
+            
+            whichCluster = checkKeyHash(key) #cluster the key should go into found by hashing
+            if whichCluster != partition: #need to forward get to different cluster
+                try:
+                    timestamp = request.form['timestamp']
+                except:
+                    timestamp = ''
+                response = forwardGet(whichCluster, key, causalPayload, timestamp)
+                return response.json()
 
             clientRequest = False
             #Get attached timestamp, or set it if empty.
@@ -687,23 +763,7 @@ class Handle(Resource):
             except:
                 _print("Key not encoding", 'Pp')
                 pass
-            #Try requesting random replicas
-            noResp = True
-            dataCluster = getPartition(0) # TODO: Change this to direct to correct partition rather then '0'.
-            while noResp:
-                if dataCluster is None:
-                    return {'result': 'error', 'msg': 'Server unavailable'}, 500
-                repIp = random.choice(dataCluster)
-                try:
-                    response = requests.put((http_str + repIp + kv_str + key), 
-                        data = {'val': value, 'causal_payload': causalPayload })
-                except requests.exceptions.RequestException as exc: #Handle replica failure
-                    dataCluster.remove(repIp)
-                    view.remove(repIp)
-                    notInView.append(repIp)
-                    notInView = sortIPs(notInView)
-                    continue
-                noResp = False
+            response = forwardPut(checkKeyHash(key), key, causalPayload, timestamp)
             _print(response.json(), 'Pp')
             return response.json()
 
