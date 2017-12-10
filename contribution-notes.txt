@@ -1,4 +1,5 @@
-Mike: initialization control, get/put integrated into single flask resource, update_view overhaul, code merging, testing and debuging
+Michael Hamilton: Worked on Proxy / Partition creation, assigning nodes to correct partitions, resizing partitions and reassigning nodes to correct partition or to become a proxy
+					Maintaining data when partitions crash. Updating view. Broadcasting puts to replicas in your partition. Testing and debugging of system.
 
 Vikram: consistent hashing, update_view overhaul, code merging, testing and debuging
 
