@@ -1,7 +1,7 @@
-Mike: Broadcast, setup and environmental variables, encoding, get and put of replicas, fixing get/put for proxies / testing and debuging
+Mike: initialization control, get/put integrated into single flask resource, update_view overhaul, code merging, testing and debuging
 
-Vikram: Created heartbeat, read repair, ip sorting function, get node detals, get all replicas / worked on proxy forwarding, replica and proxy PUT special functions / testing and debuging
+Vikram: consistent hashing, update_view overhaul, code merging, testing and debuging
 
-Tom: special put/get commands, system commands, update view,  / testing and debuging
+Tom: partition model, function chunking, broadcast+forwarding communications functions, read repair repair, modular debug printing, code cleanup, code merging, testing and debuging
 
-note: we worked together almost all of the time, many of the contributions overlap
+note: many of the contributions still overlap
