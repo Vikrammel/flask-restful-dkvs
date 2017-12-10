@@ -362,10 +362,15 @@ def updateRatio():
                     _print("Converted to " + str(getReplicaDetail()) + " at 0.5", 'Ur')
                     proxies.append(IpPort)
                     proxies = sortIPs(proxies)
+                    for key in d:
+                        forwardPut(checkKeyHash(key), key, d[key], vClock[key], storedTimeStamp[key])
             else:
                 setReplicaDetail(1)
                 _print("Converted to " + str(getReplicaDetail()) + " at 1", 'Ur')
-            d = {} # Potentially dangerous. Alternative?
+            # Potentially dangerous. Alternative?
+            d = {}
+            vClock = {}
+            storedTimeStamp = {}
 
     for node in view:
         # This is a proxy.
