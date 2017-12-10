@@ -356,7 +356,6 @@ def updateRatio():
         if partition != newPartition:
             partition = newPartition
             replicas = []
-            d = {} # Potentially dangerous. Alternative?
             if partition >= proxyPartition:
                 if IpPort not in proxies:
                     setReplicaDetail(0)
@@ -366,6 +365,7 @@ def updateRatio():
             else:
                 setReplicaDetail(1)
                 _print("Converted to " + str(getReplicaDetail()) + " at 1", 'Ur')
+            d = {} # Potentially dangerous. Alternative?
 
     for node in view:
         # This is a proxy.
@@ -467,7 +467,7 @@ def forwardGet(cluster, key, causalPayload, timestamp):
     #_print(response.json(), 'Fg')
     return response.json()
 
-def forwardPut(cluster, key, causalPayload, timestamp):
+def forwardPut(cluster, key, value, causalPayload, timestamp):
     #Try requesting random replicas
     noResp = True
     dataCluster = getPartition(cluster)
@@ -664,7 +664,7 @@ class Handle(Resource):
                     timestamp = request.form['timestamp']
                 except:
                     timestamp = ''
-                response = forwardGet(whichCluster, key, causalPayload, timestamp)
+                response = forwardPut(whichCluster, key, value, causalPayload, timestamp)
                 return response.json()
 
             clientRequest = False
@@ -763,7 +763,7 @@ class Handle(Resource):
             except:
                 _print("Key not encoding", 'Pp')
                 pass
-            response = forwardPut(checkKeyHash(key), key, causalPayload, timestamp)
+            response = forwardPut(checkKeyHash(key), key, value, causalPayload, timestamp)
             _print(response.json(), 'Pp')
             return response.json()
 
