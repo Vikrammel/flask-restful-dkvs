@@ -273,8 +273,11 @@ def updateView(self, key):
         view.append(ip_payload)
         view = sortIPs(view)
         if sysCall == '':
-            requests.put(http_str + ip_payload + kv_str + '_update!', 
-                data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "proxies": ','.join(proxies)})
+            try:
+                requests.put(http_str + ip_payload + kv_str + '_update!', 
+                    data = {"K": K, "view": ','.join(view), "notInView": ','.join(notInView), "proxies": ','.join(proxies)})
+            except:
+                _print("View broadcast failed.", 'Uv')
         updateRatio()
         return {"result": "success", "partition_id": int(view.index(ip_payload)/K), 
             "number_of_partitions": int(len(view)/K)}, 200
@@ -452,7 +455,8 @@ class Handle(Resource):
             try:
                 timestamp = request.form['timestamp']
             except:
-                timestamp = ''
+                clientRequest = True
+                timestamp = 0
             if timestamp is '':
                 clientRequest = True
 
