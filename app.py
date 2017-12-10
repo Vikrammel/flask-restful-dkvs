@@ -573,6 +573,8 @@ class Handle(Resource):
                 causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
             except:
                 causalPayload = ''
+            if not isNumber(causalPayload):
+                causalPayload = ''
             try:
                 key = key.encode('ascii', 'ignore')
             except:
