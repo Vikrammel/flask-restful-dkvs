@@ -1,6 +1,6 @@
 Mike: initialization control, get/put integrated into single flask resource, update_view overhaul, code merging, testing and debuging
 
-Vikram: consistent hashing, update_view overhaul, code merging, testing and debuging
+Vikram: consistent hashing, changes to get/put to accomodate consistent hashing, update_view overhaul, updateRatio overhaul, code merging, testing and debuging
 
 Tom: partition model, function chunking, broadcast+forwarding communications functions, read repair repair, modular debug printing, code cleanup, code merging, testing and debuging
 
