@@ -22,6 +22,12 @@ def _print(text, id=''):
             return
         print (text)
         sys.stdout.flush()
+def isNumber(n):
+    try:
+        float(n)
+        return True
+    except ValueError:
+        return False
 
 # Get expected environment variables.
 IpPort = os.environ.get('IPPORT')
@@ -200,7 +206,7 @@ def updateHashRing():
             hashClusterMap[hasher.hexdigest()] = cIndex
 
 def updateDatabase():
-    global replicas, notInView
+    global replicas, notInView, d, vClock, storedTimeStamp
     for ip in replicas:
     updateHashRing() #initially called it here, seemes excessive,
     # calling only when view[] and notInView change now (in heartbeat)
@@ -365,7 +371,7 @@ def updateRatio():
 
 #read-repair function
 def readRepair(key):
-    global replicas, notInView
+    global replicas, notInView, d, vClock, storedTimeStamp
     for ip in replicas:
         if ip == IpPort:
             continue
@@ -460,7 +466,7 @@ class Handle(Resource):
             if timestamp is '':
                 clientRequest = True
 
-            # Get timestamp, if it exist
+            #Get timestamp, if it exists.
             if key in storedTimeStamp:
                 timestamp = storedTimeStamp[key]
             
@@ -468,10 +474,14 @@ class Handle(Resource):
                 causalPayload = request.form['causal_payload']
             except:
                 causalPayload = ''
-                pass
-            if causalPayload is None:
-                if vClock[key] is None:
+            #This if should never trigger, since key is in d if we got this far.
+            if vClock.get(key) is None:
+                if not isNumber(causalPayload):
                     vClock[key] = 0
+                else:
+                    vClock[key] = causalPayload
+            elif isNumber(causalPayload) and (vClock[key] < int(causalPayload)):
+                readRepair(key)
             #Increment vector clock when client get operation succeeds.
             if clientRequest:
                 vClock[key] += 1
@@ -606,6 +616,7 @@ class Handle(Resource):
                     if key in storedTimeStamp:
                         if storedTimeStamp[key] < timestamp:
                             d[key] = value
+                            storedTimeStamp[key] = timestamp
                         elif storedTimeStamp[key] == timestamp:
                             if d[key] < value:
                                 d[key] = value
