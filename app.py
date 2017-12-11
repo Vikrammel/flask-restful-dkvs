@@ -147,9 +147,6 @@ def removeProxie(ip):
     if ip in view:
         view.remove(ip)
 
-def die(exitCode):
-    sys.exit(exitCode)
-
 def heartBeat():
     heart = threading.Timer(3.0, heartBeat)
     heart.daemon = True
@@ -171,6 +168,7 @@ def heartBeat():
                 notInView.remove(ip)
                 view.append(ip)
                 view = sortIPs(view)
+                #updateHashRing()
         except: #Handle no response from i
             pass
     for ip in view:
@@ -184,7 +182,7 @@ def heartBeat():
                     removeProxie(ip)
                 notInView.append(ip)
                 notInView = sortIPs(notInView)
-    #updateHashRing()
+                #updateHashRing()
     updateRatio()
     _print("reps " + str(replicas), 'Hb')
     _print("prox " + str(proxies), 'Hb') 
@@ -242,6 +240,7 @@ def updateDatabase():
             continue
         try:
             response = (requests.get((http_str + ip + kv_str + '_getAllKeys!'), timeout=5)).json()
+            responseD = {}
             try:
                 responseD = json.loads(response['dict'])
             except:
@@ -337,7 +336,6 @@ def updateView(self, key):
         if ip_payload in notInView:
             notInView.remove(ip_payload)
         
-        # requests.put(http_str + ip_payload + kv_str + '_die!', data = {})
         # Update Replica/Proxie Ratio if needed
         updateRatio()
         return {"result": "success", "number_of_partitions": int(len(view)/K)}, 200
@@ -611,10 +609,6 @@ class Handle(Resource):
             #Special command: Handles adding/deleting nodes.
             if key == 'update_view':
                 return updateView(self, key)
-            #Special command: Kill this node dead.
-            if key == '_die!':
-                die(0)
-                return {"result": "error", 'msg': 'Node at '+IpPort+' failed to die.'}, 500
             #Special command: View update.
             if key == '_update!':
                 try:
@@ -644,6 +638,8 @@ class Handle(Resource):
             try:
                 value = request.form['val'].encode('ascii', 'ignore')
             except:
+                value = ''
+            if not value:
                 return {'result': 'error', 'msg': 'No value provided'}, 403
             try:
                 causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
@@ -668,7 +664,7 @@ class Handle(Resource):
                 return {'result': 'error', 'msg': 'Object too large. Size limit is 1MB'}, 403
             
             whichCluster = checkKeyHash(key) #cluster the key should go into found by hashing
-            if whichCluster != partition: #need to forward get to different cluster
+            if whichCluster != partition: #need to forward put to different cluster
                 try:
                     timestamp = request.form['timestamp']
                 except:
