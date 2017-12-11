@@ -361,7 +361,11 @@ def updateRatio():
             if IpPort not in proxies:
                 if len(d) != 0:
                     for key in d:
-                        forwardPut(0, key, d[key], vClock[key], storedTimeStamp[key])
+                        resp = forwardPut(0, key, d[key], vClock[key], storedTimeStamp[key])
+                        # Check that forwarding data actually worked. If it didn't, abort update and try again next time.
+                        if (resp.json()).status_code not in [200, 201]:
+                            partition = -1
+                            return
                 d = {}
                 vClock = {}
                 storedTimeStamp = {}
