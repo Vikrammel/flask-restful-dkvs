@@ -363,7 +363,7 @@ def updateRatio():
                     for key in d:
                         resp = forwardPut(0, key, d[key], vClock[key], storedTimeStamp[key])
                         # Check that forwarding data actually worked. If it didn't, abort update and try again next time.
-                        if (resp.json()).status_code not in [200, 201]:
+                        if resp.status_code not in [200, 201]:
                             partition = -1
                             return
                 d = {}
@@ -544,7 +544,7 @@ class Handle(Resource):
                 except:
                     timestamp = ''
                 response = forwardGet(whichCluster, key, causalPayload, timestamp)
-                return response.json()
+                return response
 
             #If key is not in dict, return error.
             if key not in d:
@@ -603,8 +603,8 @@ class Handle(Resource):
             except:
                 causalPayload = ''
             response = forwardGet(checkKeyHash(key), key, causalPayload, timestamp)
-            _print(response.json(), 'Gp')
-            return response.json()
+            _print(response, 'Gp')
+            return response
 
     #Handles PUT request
     def put(self, key):
@@ -773,8 +773,8 @@ class Handle(Resource):
                 _print("Key not encoding", 'Pp')
                 pass
             response = forwardPut(checkKeyHash(key), key, value, causalPayload, timestamp)
-            _print(response.json(), 'Pp')
-            return response.json()
+            _print(response, 'Pp')
+            return response
 
 api.add_resource(Handle, '/kv-store/<key>')
 
