@@ -4,21 +4,22 @@
 from flask import Flask
 from flask import request, abort, jsonify, json
 from flask_restful import Resource, Api
-import re, sys, os, requests, datetime, threading, random, bisect, logging
+import re, sys, os, requests, datetime, threading, random, bisect
 from hashlib import md5
-
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 api = Api(app)
 newline = "\n"
 # Debug printing boolean.
 debug = True
-# Array to fill with print IDs to ignore when debugging. Add 'Hb' to ignore heartBeat prints, etc.
-ignorePrints = []
+showHb = True
+showTempD = True
 firstHeartBeat = True
 
+def _tempPrint(text):
+    if showTempD:
+        print (text)
+        sys.stdout.flush()
 
 def isNumber(n):
     try:
@@ -27,8 +28,13 @@ def isNumber(n):
     except ValueError:
         return False
 
-def _print(text, id=''):
-    if debug and (id not in ignorePrints):
+def _printHb(text):
+    if showHb:
+        print (text)
+        sys.stdout.flush()
+
+def _print(text):
+    if debug:
         print (text)
         sys.stdout.flush()
 
@@ -38,9 +44,9 @@ try:
     K = int(os.environ.get('K'))
 except:
     K = ''
-halfNode = False
 try:
     EnvView = os.environ.get('VIEW')
+    halfNode = False
 except:
     EnvView = ''
     halfNode = True
@@ -75,7 +81,8 @@ def getReplicaDetail():
 
 def printDict():
     for k in d:
-        print(str(k) + newline + sttr(d[k]))
+        print(str(k))
+        print(sttr(d[k]))
         sys.stdout.flush()
 
 def setReplicaDetail(number):
@@ -127,13 +134,36 @@ def sortIPs(IPArr):
         AnsArr[j+1] = ip
     return AnsArr
 
-#initialize view array based on environment variable 'VIEW'
+
 if EnvView is not None:
     notInView = EnvView.split(",")
     notInView = sortIPs(notInView)
 if IpPort in notInView:
     notInView.remove(IpPort)
 view.append(IpPort)
+
+
+
+# Initialize view array based on Environment Variable 'VIEW'
+# if EnvView is not None:
+#     print("env view is not none")
+#     sys.stdout.flush()
+#     view = EnvView.split(",")
+#     for i in view:
+#         if view.index(i) < K:
+#             replicas.append(i)
+#             replicas = sortIPs(replicas)
+#         else:
+#             proxies.append(i)
+#             proxies = sortIPs(proxies)
+        
+#     if IpPort in replicas:
+#         setReplicaDetail(1)
+# else:
+#     print("env view is none")
+#     sys.stdout.flush()
+#     view = []
+#     view.append(IpPort)
 
 def removeReplica(ip):
     if ip in replicas:
@@ -147,6 +177,17 @@ def removeProxie(ip):
     if ip in view:
         view.remove(ip)
 
+def updateCDict():
+    #sort view and update cDict off of view
+    global view, cDict
+    view = sortIPs(view)
+    for node in view:
+        clusterNum = view.index(node)/int(K)
+        cDict[node] = clusterNum
+    for node in cDict.keys():
+        if node not in view:
+            cDict.pop(node, None)
+
 def heartBeat():
     heart = threading.Timer(3.0, heartBeat)
     heart.daemon = True
@@ -156,10 +197,10 @@ def heartBeat():
         firstHeartBeat = False
         return
 
-    _print("My IP: " + str(IpPort) + newline +
+    _printHb("My IP: " + str(IpPort) + newline +
     "View: " + str(view) + newline +
     "Replicas: " + str(replicas) + newline +
-    "Proxies: " + str(proxies), 'hb')
+    "Proxies: " + str(proxies))
 
     for ip in notInView: #check if any nodes not currently in view came back online
         try:
@@ -188,31 +229,6 @@ def heartBeat():
     print("prox " + str(proxies))
     sys.stdout.flush()
 
-def checkKeyHash(key):
-    #updateHashRing()
-    global cDict, K, view, hashClusterMap, hashRing, partition
-    hasher = md5()
-
-    hasher.update(key)
-    ringIndex = bisect.bisect(hashRing, hasher.hexdigest())
-    if ringIndex > (len(hashRing) - 1):
-        ringIndex = len(hashRing) - 1
-    elif ringIndex < 0:
-        ringIndex = 0
-    ringHash = hashRing[ringIndex]
-    return hashClusterMap[ringHash] #returns which cluster key should be put to/got from
-
-def updateCDict():
-    #sort view and update cDict off of view
-    global view, cDict
-    view = sortIPs(view)
-    for node in view:
-        clusterNum = view.index(node)/int(K)
-        cDict[node] = clusterNum
-    for node in cDict.keys():
-        if node not in view:
-            cDict.pop(node, None)
-
 def updateHashRing():
     global cDict, K, view, hashClusterMap, hashRing
     cSet = set()
@@ -234,14 +250,29 @@ def updateHashRing():
             bisect.insort(hashRing, hasher.hexdigest())
             hashClusterMap[hasher.hexdigest()] = cIndex
 
+def checkKeyHash(key):
+    #updateHashRing()
+    global cDict, K, view, hashClusterMap, hashRing, partition
+    hasher = md5()
+
+    hasher.update(key)
+    ringIndex = bisect.bisect(hashRing, hasher.hexdigest())
+    if ringIndex > (len(hashRing) - 1):
+        ringIndex = len(hashRing) - 1
+    elif ringIndex < 0:
+        ringIndex = 0
+    ringHash = hashRing[ringIndex]
+    return hashClusterMap[ringHash] #returns which cluster key should be put to/got from
+
+
 def updateDatabase():
     global replicas, notInView
     for ip in replicas:
         if ip == IpPort:
             continue
         try:
+            #TODO: create _getAll! function, returning [d, vClock, storedTimeStamp]
             response = (requests.get((http_str + ip + kv_str + '_getAllKeys!'), timeout=5)).json()
-            responseD = {}
             try:
                 responseD = json.loads(response['dict'])
             except:
@@ -251,8 +282,7 @@ def updateDatabase():
             responseTime = json.loads(response['timestamp'])
             for key in json.loads(response['dict']):
                 if (d.get(key) == None or responseCausal[key] > vClock[key] or
-                   (responseCausal[key] == vClock[key] and responseTime[key] > storedTimeStamp[key]) or
-                   (responseTime[key] == storedTimeStamp[key] and responseD[key] > d[key])):
+                   (responseCausal[key] == vClock[key] and responseTime[key] > storedTimeStamp[key])):
                     d[key] = responseD[key].encode('ascii', 'ignore')
                     vClock[key] = responseCausal[key]
                     storedTimeStamp[key] = responseTime[key]
@@ -264,9 +294,9 @@ def updateDatabase():
 
 def updateView(self, key):
     global firstHeartBeat, replicas, proxies, view, notInView, K, halfNode
+    # Special condition for broadcasted changes.
     if halfNode == True:
         halfNode = False
-    #special condition for broadcast
     try:
         sysCall = request.form['_systemCall']
         ip_payload = request.form['ip_port'].encode('ascii', 'ignore')
@@ -338,11 +368,12 @@ def updateView(self, key):
             if ip_payload in notInView:
                 notInView.remove(ip_payload)
         
+        # requests.put(http_str + ip_payload + kv_str + '_die!', data = {})
         # Update Replica/Proxie Ratio if needed
         updateRatio()
 
-        # if ip_payload in notInView:
-        #     notInView.remove(ip_payload)
+        if ip_payload in notInView:
+            notInView.remove(ip_payload)
         return {"result": "success", "number_of_partitions": int(len(view)/K)}, 200
     return {'result': 'error', 'msg': 'Request type not valid'}, 403
 
@@ -369,13 +400,9 @@ def updateRatio():
                 
                 if len(d) != 0:
                     for key in d:
-                        resp = forwardPut(0, key, d[key], vClock[key], storedTimeStamp[key])
-                        # Check that forwarding data actually worked. If it didn't, abort update and try again next time.
-                        if (resp.json()).status_code not in [200, 201]:
-                            partition = -1
-                            return
+                        forwardPut(0, key, d[key], vClock[key], storedTimeStamp[key])
 
-                #d = {}
+                d = {}
                 vClock = {}
                 storedTimeStamp = {}
 
@@ -521,11 +548,8 @@ class Handle(Resource):
                 except:
                     return {"result": "error", 'msg': 'Partition not specified'}, 403
                 #TODO: Return members of the given partition, rather then simply the local one.
-                if partition_id == int(partition):
-                    return {"result": "success", "partition_members": replicas}, 200
-                else:
-                    members = getPartition(partition_id)
-                    return {"result": "success", "partition_members": members}, 200
+                return {"result": "success", "partition_members": getPartition(partition_id)}, 200
+
             if key == '_getAllKeys!':
                 if halfNode == True:
                     return {"result": "half"}, 207
@@ -553,7 +577,7 @@ class Handle(Resource):
                     timestamp = storedTimeStamp[key]
                 
                 try:
-                    causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
+                    causalPayload = request.form['causal_payload']
                 except:
                     causalPayload = ''
                 if causalPayload is None:
@@ -567,7 +591,7 @@ class Handle(Resource):
                     'causal_payload': vClock[key], 'timestamp': timestamp}, 200
             else:#need to forward get to different cluster
                 try:
-                    causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
+                    causalPayload = request.form['causal_payload']
                 except:
                     causalPayload = ''
                 try:
@@ -613,7 +637,7 @@ class Handle(Resource):
             except:
                 timestamp = ''
             try:
-                causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
+                causalPayload = request.form['causal_payload']
             except:
                 causalPayload = ''
             whichCluster = checkKeyHash(key) #cluster the key should go into found by hashing
@@ -642,6 +666,32 @@ class Handle(Resource):
             #Special command: Handles adding/deleting nodes.
             if key == 'update_view':
                 return updateView(self, key)
+
+            #DANGEROUS CODE BELOW commented because it lets broadcasts overwrite unconditionally
+            # Handles an incoming broadcast from another node
+            # if key == 'bc':
+            #     _print("Incoming Broadcast...")
+            #     try:
+            #         value = request.form['val'].encode('ascii', 'ignore')
+            #     except:
+            #         _print("Value not succesfully retrieved")
+            #     try:
+            #         causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
+            #     except:
+            #         _print("Causal Payload not succesfully retrieved")
+            #     try:
+            #         dKey = request.form['key'].encode('ascii', 'ignore')
+            #     except:
+            #         _print("Key not succesfully retrieved")
+            #     try:
+            #         timestamp = request.form['timestamp']
+            #     except:
+            #         _print("Timestamp not succesfully retrieved")
+                    
+            #     d[dKey] = value
+            #     vClock[key] = causalPayload
+            #     storedTimeStamp[key] = timestamp
+            #     return {"result":"success"}, 269
 
             #Special command: Force read repair and view update.
             if key == '_update!':
@@ -676,9 +726,17 @@ class Handle(Resource):
 
                 if uni == 1:
                     try: 
-                        d = json.loads(request.form['d'])
-                        vClock = json.loads(request.form['vClock'])
-                        storedTimeStamp = json.loads(request.form['storedTimeStamp'])
+                        dt = json.loads(request.form['d'])
+                        vt = json.loads(request.form['vClock'])
+                        st = json.loads(request.form['storedTimeStamp'])
+                        print("type of dt = " + str(type(dt)))
+                        print(dt)
+                        print(vt)
+                        print(st)
+                        sys.stdout.flush()
+                        d = dt
+                        vClock = vt
+                        storedTimeStamp = st
                     except:
                         return {"result": "error", 'msg': 'Passing d failed'}, 403
                 return {"result": "success"}, 200
@@ -837,11 +895,10 @@ class Handle(Resource):
                 uV = request.form['val']
                 value = uV.encode('ascii', 'ignore')
             except:
-                value = ''
-            if not value:
                 return {"result": "error", 'msg': 'No value provided'}, 403
             try:
-                causalPayload = int(request.form['causal_payload'].encode('ascii', 'ignore'))
+                uC = request.form['causal_payload']
+                causalPayload = uC.encode('ascii', 'ignore')
             except:
                 causalPayload = ''
             try:
