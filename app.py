@@ -465,10 +465,10 @@ def readRepair(key):
     for ip in replicas:
         try:
             response = requests.get((http_str + ip + kv_str + key), timeout=2)
-            if response[causal_payload] > vClock[key]:
-                d[key] = response[value]
-                vClock[key] = response[causal_payload]
-                storedTimeStamp[key] = response[timestamp]
+            if response['causal_payload'] > vClock[key]:
+                d[key] = response['value']
+                vClock[key] = response['causal_payload']
+                storedTimeStamp[key] = response['timestamp']
         except requests.exceptions.RequestException: #Handle no response from ip
             removeReplica(ip)
             notInView.append(ip)
