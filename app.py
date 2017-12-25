@@ -95,6 +95,7 @@ def setReplicaDetail(number):
 
 # Cleans empty strings out of our arrays...
 def cleanArrays():
+    global view, replicas, proxies, notInView
     if len(view) > 0:
         while view[0] == '':
             view.pop(0)
@@ -166,12 +167,14 @@ view.append(IpPort)
 #     view.append(IpPort)
 
 def removeReplica(ip):
+    global replicas, view
     if ip in replicas:
         replicas.remove(ip)
     if ip in view:
         view.remove(ip)
 
 def removeProxie(ip):
+    global proxies, view
     if ip in proxies:
         proxies.remove(ip)
     if ip in view:
@@ -192,7 +195,7 @@ def heartBeat():
     heart = threading.Timer(3.0, heartBeat)
     heart.daemon = True
     heart.start()
-    global firstHeartBeat, replicas, proxies, view, notInView, hashRing, K
+    global firstHeartBeat, replicas, proxies, view, notInView
     if firstHeartBeat:
         firstHeartBeat = False
         return
@@ -252,7 +255,7 @@ def updateHashRing():
 
 def checkKeyHash(key):
     #updateHashRing()
-    global cDict, K, view, hashClusterMap, hashRing, partition
+    global hashClusterMap, hashRing
     hasher = md5()
 
     hasher.update(key)
@@ -266,7 +269,7 @@ def checkKeyHash(key):
 
 
 def updateDatabase():
-    global replicas, notInView
+    global replicas, notInView, IpPort, d, vClock, storedTimeStamp
     for ip in replicas:
         if ip == IpPort:
             continue
@@ -293,7 +296,7 @@ def updateDatabase():
             notInView = sortIPs(notInView)
 
 def updateView(self, key):
-    global firstHeartBeat, replicas, proxies, view, notInView, K, halfNode
+    global replicas, proxies, view, notInView, K, halfNode, IpPort
     # Special condition for broadcasted changes.
     if halfNode == True:
         halfNode = False
@@ -323,7 +326,7 @@ def updateView(self, key):
 
     if sysCall == '':
         for address in view:
-            if address == IpPort or address == ip_payload:
+            if (address == IpPort) or (address == ip_payload):
                 continue
             try:
                 requests.put((http_str + address + kv_str + 'update_view'),
@@ -381,7 +384,7 @@ def putKey(self, key):
     pass
 
 def updateRatio():
-    global view, replicas, proxies, partition, d
+    global view, replicas, proxies, partition, vClock, storedTimeStamp, d, IpPort
     view = sortIPs(view)
 
     newPartition = int(view.index(IpPort)/K)
@@ -458,21 +461,21 @@ def updateRatio():
    
 #read-repair function
 def readRepair(key):
-    global firstHeartBeat, replicas, proxies, view, notInView
+    global replicas, proxies, view, notInView, vClock, storedTimeStamp
     for ip in replicas:
         try:
             response = requests.get((http_str + ip + kv_str + key), timeout=2)
             if response[causal_payload] > vClock[key]:
                 d[key] = response[value]
                 vClock[key] = response[causal_payload]
-                timestamps[key] = response[timestamp]
+                storedTimeStamp[key] = response[timestamp]
         except requests.exceptions.RequestException: #Handle no response from ip
             removeReplica(ip)
             notInView.append(ip)
             notInView = sortIPs(notInView)
 
 def broadcastKey(key, value, payload, time):
-    global firstHeartBeat, replicas, proxies, view, notInView
+    global replicas, notInView, IpPort
     for address in replicas:
         if address != IpPort:
             try:
@@ -487,8 +490,9 @@ def broadcastKey(key, value, payload, time):
                 notInView.append(address)
 
 def getPartition(num):
-    partitionStart = num*K
-    partitionEnd = partitionStart + K
+    global K, view
+    partitionStart = int(num)*int(K)
+    partitionEnd = partitionStart + int(K)
     if partitionEnd > len(view):
         return None
     membersRange = range(partitionStart, partitionEnd)
@@ -501,11 +505,12 @@ def getPartition(num):
 
 
 def forwardPut(cluster, key, value, causalPayload, timestamp):
+    global notInView
     #Try requesting random replicas
     noResp = True
     dataCluster = getPartition(cluster)
     while noResp:
-        if dataCluster is None:
+        if (dataCluster is None) or (len(dataCluster)==0):
             return {'result': 'error', 'msg': 'Server unavailable'}, 500
         repIp = random.choice(dataCluster)
         try:
@@ -525,7 +530,7 @@ class Handle(Resource):
 
     #Handles GET request
     def get(self, key):
-        global d, vClock, storedTimeStamp, halfNode, partition, cDict, K, notInView
+        global d, vClock, storedTimeStamp, halfNode, partition, cDict, K, notInView, view, replicas, proxies
         if getReplicaDetail():
             _print("Replica request\n\n")
             
@@ -608,9 +613,11 @@ class Handle(Resource):
                         response = requests.get(http_str + node + kv_str + key,
                             data={'causal_payload': causalPayload, 'timestamp': timestamp})
                     except requests.exceptions.RequestException as exc: #Handle replica failure
-                        view.remove(node)
-                        notInView.append(node)
-                        notInView = sortIPs(notInView)
+                        if node in view:
+                            view.remove(node)
+                        if node not in notInView:
+                            notInView.append(node)
+                            notInView = sortIPs(notInView)
                         continue
                     return response.json()
                 return {'result': 'error', 'msg': 'Server unavailable'}, 500
@@ -650,9 +657,11 @@ class Handle(Resource):
                     response = requests.get(http_str + node + kv_str + key,
                         data={'causal_payload': causalPayload, 'timestamp': timestamp})
                 except requests.exceptions.RequestException as exc: #Handle replica failure
-                    view.remove(node)
-                    notInView.append(node)
-                    notInView = sortIPs(notInView)
+                    if node in view:
+                        view.remove(node)
+                    if node not in notInView:
+                        notInView.append(node)
+                        notInView = sortIPs(notInView)
                     continue
                 return response.json()
             return {'result': 'error', 'msg': 'Server unavailable'}, 500
@@ -660,9 +669,9 @@ class Handle(Resource):
 
     #Handles PUT request
     def put(self, key):
-
+        global d, vClock, storedTimeStamp, halfNode, partition, cDict, K, notInView, view, replicas, proxies, isReplica
         if getReplicaDetail():
-            global K, view, notInView, replicas, proxies, d, vClock, storedTimeStamp
+            # global K, view, notInView, replicas, proxies, d, vClock, storedTimeStamp
             #Special command: Handles adding/deleting nodes.
             if key == 'update_view':
                 return updateView(self, key)
@@ -838,7 +847,7 @@ class Handle(Resource):
             
 
         else: #proxy put
-            global replicas
+            # global replicas
             #Special command: Handles adding/deleting nodes.
             if key == 'update_view':
                 return updateView(self, key)
