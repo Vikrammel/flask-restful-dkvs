@@ -1,0 +1,21 @@
+sudo docker network create --subnet 10.0.0.0/16 mynet
+
+sudo docker build -t mycontainer .
+
+sudo docker run -p 8084:8080 --ip=10.0.0.24 --net=mynet -e K=3 -e VIEW="10.0.0.21:8080,10.0.0.22:8080,10.0.0.23:8080,10.0.0.24:8080" -e IPPORT="10.0.0.24:8080" mycontainer
+
+sudo docker run -p 8084:8080 --ip=10.0.0.24 --net=mynet -e IPPORT="10.0.0.24:8080" mycontainer
+
+curl http://10.0.0.21:8080/kv-store/update_view?type=remove -d "ip_port=10.0.0.22:8080" -X PUT
+
+curl http://10.0.0.21:8080/kv-store/update_view?type=add -d "ip_port=10.0.0.22:8080" -X PUT
+
+curl http://10.0.0.22:8080/kv-store/get_node_details -X GET
+
+curl http://10.0.0.22:8080/kv-store/get_all_replicas -X GET
+
+curl http://10.0.0.22:8080/kv-store/_showView! -X GET
+
+curl http://10.0.0.22:8080/kv-store/_showNotInView! -X GET
+
+curl http://10.0.0.22:8080/kv-store/_showProxies! -X GET
